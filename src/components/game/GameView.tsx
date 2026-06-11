@@ -4,9 +4,11 @@ import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { beginNight, beginNextNight } from '@/app/actions/game'
 import AnnouncementFeed from './AnnouncementFeed'
-import PhaseTimer from './PhaseTimer'
+import CircularTimer from './CircularTimer'
+import PhaseBanner from './PhaseBanner'
 import NightPanel from './NightPanel'
 import VotingPanel from './VotingPanel'
+import RulesButton from '@/components/rules/RulesModal'
 import type { Role, GamePhase, PublicPlayer, Announcement } from '@/types/database'
 import Button from '@/components/ui/Button'
 
@@ -32,15 +34,32 @@ export type GameViewProps = {
   revealRoleOnDeath: boolean
 }
 
-const PHASE_LABEL: Record<GamePhase, string> = {
-  ROLE_REVEAL: 'Role Reveal',
-  NIGHT_ACTIONS_OPEN: 'Night',
-  NIGHT_RESOLUTION: 'Resolving Night…',
-  DAY_ANNOUNCEMENT: 'Morning',
-  DISCUSSION: 'Discussion',
-  VOTING: 'Voting',
-  VOTE_RESOLUTION: 'Vote Results',
-  GAME_OVER: 'Game Over',
+// Seconds per phase (for CircularTimer proportion)
+const PHASE_TOTAL: Partial<Record<GamePhase, number>> = {
+  NIGHT_ACTIONS_OPEN: 60,
+  DISCUSSION: 180,
+  VOTING: 60,
+}
+
+const ROLE_COLOR: Record<Role, string> = {
+  MAFIA: 'text-red-400',
+  DOCTOR: 'text-cyan-400',
+  DETECTIVE: 'text-purple-400',
+  VILLAGER: 'text-green-400',
+}
+
+const ROLE_BADGE: Record<Role, string> = {
+  MAFIA: 'border-red-600/50 bg-red-950/30',
+  DOCTOR: 'border-cyan-600/50 bg-cyan-950/20',
+  DETECTIVE: 'border-purple-600/50 bg-purple-950/20',
+  VILLAGER: 'border-green-600/50 bg-green-950/20',
+}
+
+// Phase-level background tint applied to <main>
+const PHASE_BG: Partial<Record<GamePhase, string>> = {
+  NIGHT_ACTIONS_OPEN: 'bg-blue-950/10',
+  NIGHT_RESOLUTION:   'bg-blue-950/10',
+  VOTING:             'bg-red-950/10',
 }
 
 export default function GameView(props: GameViewProps) {
@@ -53,165 +72,235 @@ export default function GameView(props: GameViewProps) {
 
   const router = useRouter()
 
-  // Poll every 3 s — server re-renders check deadline & advance phase
   useEffect(() => {
     const id = setInterval(() => router.refresh(), 3000)
     return () => clearInterval(id)
   }, [router])
 
-  const roleColors: Record<Role, string> = {
-    MAFIA: 'text-red-400', DOCTOR: 'text-blue-400',
-    DETECTIVE: 'text-purple-400', VILLAGER: 'text-green-400',
-  }
+  const phaseBg = PHASE_BG[phase] ?? ''
+  const totalSecs = PHASE_TOTAL[phase] ?? 60
 
   return (
-    <div className="flex flex-1 flex-col">
-      {/* Header */}
-      <header className="border-b border-border bg-surface px-6 py-3">
-        <div className="mx-auto flex max-w-4xl items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="font-bold text-text-primary">Mafia</span>
-            <span className="text-xs text-text-muted">·</span>
-            <span className="text-sm text-text-muted">{PHASE_LABEL[phase]}</span>
-            {roundNumber > 0 && (
-              <span className="text-xs text-text-muted">· Round {roundNumber}</span>
-            )}
-          </div>
-          <div className="flex items-center gap-3">
-            {myIsAlive ? (
-              <span className={`text-xs font-semibold uppercase tracking-wide ${roleColors[myRole]}`}>
+    <div className={`flex flex-1 flex-col ${phaseBg} transition-colors duration-700`}>
+
+      {/* ── Header ──────────────────────────────────────────────────────── */}
+      <header className="sticky top-0 z-20 border-b border-border bg-surface/90 backdrop-blur-sm px-4 py-3">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
+
+          {/* Left: brand + role badge */}
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="font-bold text-text-primary hidden sm:block">Mafia</span>
+            <div
+              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 ${myIsAlive ? ROLE_BADGE[myRole] : 'border-border bg-surface-raised opacity-50'}`}
+            >
+              <span className={`text-xs font-bold ${myIsAlive ? ROLE_COLOR[myRole] : 'text-text-muted'}`}>
                 {myRole}
               </span>
-            ) : (
-              <span className="text-xs text-text-muted">💀 Eliminated</span>
-            )}
-            <PhaseTimer deadline={phaseDeadline} />
+              {!myIsAlive && <span className="text-xs">💀</span>}
+            </div>
+          </div>
+
+          {/* Centre: round label (hidden on xs) */}
+          <p className="hidden sm:block text-xs text-text-muted">
+            {roundNumber > 0 ? `Round ${roundNumber}` : 'Role Reveal'}
+          </p>
+
+          {/* Right: timer + rules */}
+          <div className="flex items-center gap-3">
+            <RulesButton />
+            <CircularTimer deadline={phaseDeadline} totalSeconds={totalSecs} />
           </div>
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="mx-auto max-w-2xl space-y-4">
+      {/* ── Content ─────────────────────────────────────────────────────── */}
+      <main className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-5xl px-4 py-5">
 
-          {/* Detective private result */}
-          {detectiveResult && (
-            <div className="rounded-xl border border-purple-600/40 bg-purple-950/20 px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-widest text-purple-400">
-                Your investigation result
-              </p>
-              <p className="mt-1 text-sm text-text-primary">{detectiveResult}</p>
-            </div>
-          )}
+          {/* Two-column on lg+ */}
+          <div className="lg:grid lg:grid-cols-[1fr_320px] lg:gap-6 space-y-4 lg:space-y-0">
 
-          {/* Phase-specific main panel */}
-          {phase === 'ROLE_REVEAL' && (
-            <div className="rounded-xl border border-border bg-surface p-6 text-center space-y-4">
-              <p className="text-text-muted text-sm">
-                All players have received their roles. When everyone is ready, the host starts Night 1.
-              </p>
-              {isHost && (
-                <form action={beginNight.bind(null, gameId)}>
-                  <Button type="submit" className="w-full py-3">
-                    Begin Night 1
-                  </Button>
+            {/* ── Left column ─────────────────────────────────────────── */}
+            <div className="space-y-4 min-w-0">
+
+              {/* Phase banner */}
+              {phase !== 'ROLE_REVEAL' && phase !== 'GAME_OVER' && (
+                <PhaseBanner phase={phase} round={roundNumber} />
+              )}
+
+              {/* Detective private result */}
+              {detectiveResult && (
+                <div className="rounded-xl border border-purple-600/40 bg-purple-950/20 px-4 py-3 animate-fade-up">
+                  <p className="text-xs font-semibold uppercase tracking-widest text-purple-400 mb-1">
+                    🔍 Your investigation result
+                  </p>
+                  <p className="text-sm text-text-primary">{detectiveResult}</p>
+                </div>
+              )}
+
+              {/* ROLE_REVEAL waiting */}
+              {phase === 'ROLE_REVEAL' && (
+                <div className="rounded-xl border border-border bg-surface p-6 text-center space-y-4 animate-fade-up">
+                  <p className="text-text-muted text-sm">
+                    All players have received their roles. When everyone is ready, the host starts Night 1.
+                  </p>
+                  {isHost && (
+                    <form action={beginNight.bind(null, gameId)}>
+                      <Button type="submit" className="px-8 py-3">
+                        Begin Night 1
+                      </Button>
+                    </form>
+                  )}
+                  {!isHost && (
+                    <p className="text-xs text-text-muted">Waiting for the host…</p>
+                  )}
+                </div>
+              )}
+
+              {/* Night action panel */}
+              {phase === 'NIGHT_ACTIONS_OPEN' && (
+                <NightPanel
+                  gameId={gameId}
+                  myRole={myRole}
+                  isAlive={myIsAlive}
+                  players={players}
+                  currentUserId={currentUserId}
+                  submittedTargetId={myNightActionTargetId ?? null}
+                  mafiaCurrentTarget={mafiaCurrentTarget}
+                />
+              )}
+
+              {/* Night resolving */}
+              {phase === 'NIGHT_RESOLUTION' && (
+                <div className="rounded-xl border border-blue-800/30 bg-blue-950/20 p-5 text-center animate-fade-up">
+                  <p className="text-sm text-blue-300">⚙️ Resolving night actions…</p>
+                </div>
+              )}
+
+              {/* Discussion */}
+              {(phase === 'DAY_ANNOUNCEMENT' || phase === 'DISCUSSION') && (
+                <div className="rounded-xl border border-amber-700/30 bg-amber-950/10 p-5 space-y-2 animate-fade-up">
+                  <p className="text-sm font-semibold text-amber-300">
+                    {phase === 'DAY_ANNOUNCEMENT' ? '☀️ Morning has arrived' : '💬 Discussion phase'}
+                  </p>
+                  <p className="text-xs text-text-muted">
+                    {myIsAlive
+                      ? 'Debate who the Mafia might be. Voting starts when the timer ends.'
+                      : 'You are eliminated. Watch and reflect.'}
+                  </p>
+                </div>
+              )}
+
+              {/* Voting & vote resolution */}
+              {(phase === 'VOTING' || phase === 'VOTE_RESOLUTION') && (
+                <VotingPanel
+                  gameId={gameId}
+                  isAlive={myIsAlive}
+                  players={players}
+                  currentUserId={currentUserId}
+                  myVoteTargetId={myVoteTargetId}
+                  voteCounts={voteCounts}
+                  phase={phase}
+                />
+              )}
+
+              {/* After vote — host advances */}
+              {phase === 'VOTE_RESOLUTION' && isHost && !phaseDeadline && (
+                <form action={beginNextNight.bind(null, gameId)} className="animate-fade-up">
+                  <Button type="submit" className="w-full">Begin next night</Button>
                 </form>
               )}
+
+              {/* Game over */}
+              {phase === 'GAME_OVER' && (
+                <div className="rounded-2xl border border-border bg-surface p-8 text-center space-y-4 animate-card-reveal">
+                  <p className="text-5xl">{winningTeam === 'VILLAGE' ? '🏆' : '🔴'}</p>
+                  <h2 className={`text-3xl font-bold ${winningTeam === 'VILLAGE' ? 'text-green-400' : 'text-red-400'}`}>
+                    {winningTeam === 'VILLAGE' ? 'Village wins!' : 'Mafia wins!'}
+                  </h2>
+                  <p className="text-text-muted text-sm">
+                    {winningTeam === 'VILLAGE'
+                      ? 'All Mafia players have been eliminated. The village is safe.'
+                      : 'The Mafia now outnumber and control the village.'}
+                  </p>
+                  <a
+                    href="/dashboard"
+                    className="inline-block mt-2 rounded-lg bg-accent px-6 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover transition-colors"
+                  >
+                    Back to dashboard
+                  </a>
+                </div>
+              )}
+
+              {/* Player grid */}
+              <PlayerGrid players={players} currentUserId={currentUserId} />
             </div>
-          )}
 
-          {(phase === 'NIGHT_ACTIONS_OPEN') && (
-            <NightPanel
-              gameId={gameId}
-              myRole={myRole}
-              isAlive={myIsAlive}
-              players={players}
-              currentUserId={currentUserId}
-              submittedTargetId={myNightActionTargetId ?? null}
-              mafiaCurrentTarget={mafiaCurrentTarget}
-            />
-          )}
-
-          {(phase === 'NIGHT_RESOLUTION' || phase === 'DAY_ANNOUNCEMENT') && (
-            <div className="rounded-xl border border-border bg-surface p-5 text-center text-sm text-text-muted">
-              {phase === 'NIGHT_RESOLUTION' ? 'Resolving night actions…' : 'The village wakes up.'}
+            {/* ── Right column: announcements ─────────────────────────── */}
+            <div className="lg:sticky lg:top-20 lg:self-start">
+              <AnnouncementFeed announcements={announcements} />
             </div>
-          )}
-
-          {phase === 'DISCUSSION' && (
-            <div className="rounded-xl border border-border bg-surface p-5 text-center space-y-2">
-              <p className="text-sm font-semibold text-text-primary">Discussion phase</p>
-              <p className="text-xs text-text-muted">
-                {myIsAlive ? 'Debate who the Mafia might be. Voting starts when the timer ends.' : 'You are dead. Watch in silence.'}
-              </p>
-            </div>
-          )}
-
-          {(phase === 'VOTING' || phase === 'VOTE_RESOLUTION') && (
-            <VotingPanel
-              gameId={gameId}
-              isAlive={myIsAlive}
-              players={players}
-              currentUserId={currentUserId}
-              myVoteTargetId={myVoteTargetId}
-              voteCounts={voteCounts}
-              phase={phase}
-            />
-          )}
-
-          {phase === 'VOTE_RESOLUTION' && isHost && !phaseDeadline && (
-            <form action={beginNextNight.bind(null, gameId)}>
-              <Button type="submit" className="w-full">
-                Begin next night
-              </Button>
-            </form>
-          )}
-
-          {phase === 'GAME_OVER' && (
-            <div className="rounded-xl border border-border bg-surface p-8 text-center space-y-3">
-              <p className="text-4xl">{winningTeam === 'VILLAGE' ? '🏆' : '🔴'}</p>
-              <h2 className="text-2xl font-bold text-text-primary">
-                {winningTeam === 'VILLAGE' ? 'Village wins!' : 'Mafia wins!'}
-              </h2>
-              <p className="text-sm text-text-muted">
-                {winningTeam === 'VILLAGE'
-                  ? 'All Mafia have been eliminated.'
-                  : 'The Mafia now control the village.'}
-              </p>
-              <a href="/dashboard" className="mt-4 inline-block text-sm text-accent hover:text-accent-hover">
-                Back to dashboard
-              </a>
-            </div>
-          )}
-
-          {/* Player list */}
-          <div className="rounded-xl border border-border bg-surface p-5">
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-text-muted">
-              Players
-            </h3>
-            <ul className="space-y-2">
-              {players.map((p) => (
-                <li
-                  key={p.user_id}
-                  className={`flex items-center gap-3 rounded-lg px-3 py-2 ${p.is_alive ? 'bg-surface-raised' : 'opacity-40'}`}
-                >
-                  <div className="h-7 w-7 flex items-center justify-center rounded-full bg-surface text-xs font-bold text-text-muted">
-                    {p.display_name.charAt(0).toUpperCase()}
-                  </div>
-                  <span className="flex-1 text-sm text-text-primary">{p.display_name}</span>
-                  {!p.is_alive && <span className="text-xs text-text-muted">💀</span>}
-                  {p.user_id === currentUserId && <span className="text-xs text-text-muted">(you)</span>}
-                  {p.role && !p.is_alive && (
-                    <span className="text-xs text-text-muted">{p.role}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
           </div>
-
-          {/* Announcement feed */}
-          <AnnouncementFeed announcements={announcements} />
         </div>
       </main>
+    </div>
+  )
+}
+
+/* ── Player grid (inline — small enough to not need its own file) ─────────── */
+function PlayerGrid({
+  players,
+  currentUserId,
+}: {
+  players: PublicPlayer[]
+  currentUserId: string
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-surface p-5">
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-text-muted">
+        Players ({players.length})
+      </h3>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+        {players.map((p) => {
+          const isMe = p.user_id === currentUserId
+          return (
+            <div
+              key={p.user_id}
+              className={`flex flex-col items-center gap-1 rounded-xl border px-2 py-3 transition-opacity ${
+                p.is_alive
+                  ? 'border-border bg-surface-raised'
+                  : 'border-transparent bg-surface opacity-40'
+              } ${isMe ? 'ring-1 ring-accent/40' : ''}`}
+            >
+              {/* Avatar */}
+              <div
+                className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold ${
+                  p.is_alive
+                    ? 'bg-accent/15 text-accent'
+                    : 'bg-surface text-text-muted'
+                }`}
+              >
+                {p.is_alive ? p.display_name.charAt(0).toUpperCase() : '💀'}
+              </div>
+              {/* Name */}
+              <span
+                className={`text-xs font-medium text-center leading-tight line-clamp-1 w-full ${
+                  p.is_alive ? 'text-text-primary' : 'text-text-muted line-through'
+                }`}
+              >
+                {p.display_name}
+              </span>
+              {/* Badges */}
+              {isMe && (
+                <span className="text-xs text-text-muted">(you)</span>
+              )}
+              {p.role && !p.is_alive && (
+                <span className="text-xs text-text-muted">{p.role}</span>
+              )}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

@@ -181,7 +181,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
       <RoleRevealCard
         role={myRole}
         mafiaTeammates={mafiaTeammates}
-        players={players.map((p) => ({ name: p.display_name, isMe: p.user_id === session.userId }))}
+        players={players.map((p) => ({ userId: p.user_id, name: p.display_name, isMe: p.user_id === session.userId }))}
         phase={game.current_phase}
         gameId={gameId}
         isHost={isHost}

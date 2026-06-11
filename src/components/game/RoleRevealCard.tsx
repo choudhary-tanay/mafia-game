@@ -8,7 +8,7 @@ import Button from '@/components/ui/Button'
 type Props = {
   role: Role
   mafiaTeammates: string[]
-  players: { name: string; isMe: boolean }[]
+  players: { userId: string; name: string; isMe: boolean }[]
   phase: GamePhase
   gameId: string
   isHost: boolean
@@ -64,7 +64,7 @@ export default function RoleRevealCard({ role, mafiaTeammates, players, phase, g
     return (
       <div className="flex flex-1 items-center justify-center px-4 py-12">
         <div
-          className={`w-full max-w-md rounded-2xl border-2 ${cfg.border} ${cfg.bg} p-8 shadow-2xl`}
+          className={`w-full max-w-md rounded-2xl border-2 ${cfg.border} ${cfg.bg} p-8 shadow-2xl animate-card-reveal`}
         >
           {/* Header */}
           <div className="mb-6 text-center">
@@ -163,7 +163,7 @@ export default function RoleRevealCard({ role, mafiaTeammates, players, phase, g
             <ul className="space-y-2">
               {players.map((p) => (
                 <li
-                  key={p.name}
+                  key={p.userId}
                   className="flex items-center gap-3 rounded-lg bg-surface-raised px-3 py-2.5"
                 >
                   <div className="flex h-7 w-7 items-center justify-center rounded-full bg-surface text-sm font-bold text-text-muted">

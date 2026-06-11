@@ -1,34 +1,44 @@
 @import "tailwindcss";
 
+/* ─── Theme tokens ─────────────────────────────────────────────────────────── */
 :root {
-  --background: #0a0a0f;
-  --surface: #12121a;
-  --surface-raised: #1a1a26;
-  --border: #2a2a3a;
-  --text-primary: #e8e8f0;
-  --text-muted: #7a7a9a;
-  --accent: #c0392b;
-  --accent-hover: #e74c3c;
-  --accent-glow: rgba(192, 57, 43, 0.25);
+  --background:    #0a0a0f;
+  --surface:       #12121a;
+  --surface-raised:#1a1a26;
+  --border:        #2a2a3a;
+  --text-primary:  #e8e8f0;
+  --text-muted:    #6b6b85;
+  --accent:        #c0392b;
+  --accent-hover:  #e74c3c;
+  --accent-glow:   rgba(192,57,43,0.25);
+
+  /* Role palette */
+  --role-mafia:      #c0392b;
+  --role-doctor:     #0891b2;
+  --role-detective:  #7c3aed;
+  --role-villager:   #059669;
+
+  /* Phase tints */
+  --night-tint:  rgba(10,10,35,0.50);
+  --day-tint:    rgba(30,20,10,0.30);
+  --vote-tint:   rgba(40,10,10,0.40);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-surface: var(--surface);
-  --color-surface-raised: var(--surface-raised);
-  --color-border: var(--border);
-  --color-text-primary: var(--text-primary);
-  --color-text-muted: var(--text-muted);
-  --color-accent: var(--accent);
-  --color-accent-hover: var(--accent-hover);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background:    var(--background);
+  --color-surface:       var(--surface);
+  --color-surface-raised:var(--surface-raised);
+  --color-border:        var(--border);
+  --color-text-primary:  var(--text-primary);
+  --color-text-muted:    var(--text-muted);
+  --color-accent:        var(--accent);
+  --color-accent-hover:  var(--accent-hover);
+  --font-sans:  var(--font-geist-sans);
+  --font-mono:  var(--font-geist-mono);
 }
 
-html,
-body {
-  height: 100%;
-}
+/* ─── Base ─────────────────────────────────────────────────────────────────── */
+html, body { height: 100%; }
 
 body {
   background: var(--background);
@@ -37,6 +47,38 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-* {
-  border-color: var(--border);
+* { border-color: var(--border); }
+
+/* ─── Animations ───────────────────────────────────────────────────────────── */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes card-reveal {
+  0%   { opacity: 0; transform: scale(0.90) translateY(16px); }
+  60%  { transform: scale(1.02) translateY(-2px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 0   0   var(--accent-glow); }
+  50%       { box-shadow: 0 0 24px 4px var(--accent-glow); }
+}
+
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Utility classes */
+.animate-fade-up      { animation: fade-up 0.35s ease-out both; }
+.animate-fade-in      { animation: fade-in 0.25s ease-out both; }
+.animate-card-reveal  { animation: card-reveal 0.45s cubic-bezier(.22,.68,0,1.2) both; }
+.animate-glow-pulse   { animation: glow-pulse 2s ease-in-out infinite; }
+.animate-slide-in     { animation: slide-in-left 0.3s ease-out both; }
