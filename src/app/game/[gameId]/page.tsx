@@ -51,12 +51,14 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
   // ── Room settings ─────────────────────────────────────────────────────────
   const { data: room } = await supabase
     .from('rooms')
-    .select('host_user_id, reveal_role_on_death')
+    .select('host_user_id, host_guest_id, reveal_role_on_death')
     .eq('id', game.room_id)
     .single()
 
   // Guests are never host (only auth users can create rooms)
-  const isHost           = !!currentUserId && room?.host_user_id === currentUserId
+  const isHost =
+    (!!currentUserId  && room?.host_user_id  === currentUserId) ||
+    (!!currentGuestId && (room as { host_guest_id?: string | null })?.host_guest_id === currentGuestId)
   const revealRoleOnDeath = room?.reveal_role_on_death ?? false
 
   // ── Public player list (no roles unless dead + revealRoleOnDeath) ─────────

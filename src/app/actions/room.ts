@@ -3,7 +3,10 @@
 import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getSession } from '@/lib/session'
+import { getPlayerIdentity } from '@/lib/identity'
+import { createGuestSession } from '@/lib/guest-session'
 import { joinRoomSchema, updateSettingsSchema } from '@/lib/validations'
+import { type GuestActionState } from '@/app/actions/guest'
 
 export type RoomActionState = {
   errors?: Record<string, string[]>
@@ -31,8 +34,19 @@ async function generateUniqueCode(
   throw new Error('Could not generate a unique room code')
 }
 
+/** Returns true when the given identity is the host of the room */
+function identityIsHost(
+  room: { host_user_id: string | null; host_guest_id?: string | null },
+  identity: { userId: string | null; guestId: string | null },
+): boolean {
+  if (identity.userId  && room.host_user_id  === identity.userId)  return true
+  if (identity.guestId && room.host_guest_id === identity.guestId) return true
+  return false
+}
+
 // ─── Actions ─────────────────────────────────────────────────────────────────
 
+/** Create a room as an authenticated user */
 export async function createRoom(): Promise<void> {
   const session = await getSession()
   if (!session?.userId) redirect('/login')
@@ -67,6 +81,7 @@ export async function createRoom(): Promise<void> {
     .insert({
       code,
       host_user_id: session.userId,
+      host_guest_id: null,
       status: 'LOBBY',
       mafia_count: 1,
       discussion_timer_seconds: 180,
@@ -83,12 +98,64 @@ export async function createRoom(): Promise<void> {
   await supabase.from('room_players').insert({
     room_id: room.id,
     user_id: session.userId,
-    display_name: user.full_name,
+    guest_id: null,
+    is_guest: false,
+    display_name: user.full_name as string,
     avatar_url: user.avatar_url ?? null,
     is_host: true,
     is_connected: true,
   })
 
+  redirect(`/lobby/${room.code}`)
+}
+
+/** Create a room as a guest (no account required) */
+export async function createRoomAsGuest(
+  state: GuestActionState,
+  formData: FormData,
+): Promise<GuestActionState> {
+  const displayName = (formData.get('displayName') as string | null)?.trim() ?? ''
+
+  if (displayName.length < 2)
+    return { errors: { displayName: ['Name must be at least 2 characters.'] } }
+  if (displayName.length > 24)
+    return { errors: { displayName: ['Name must be 24 characters or fewer.'] } }
+
+  const supabase = createServiceClient()
+  const guestId = crypto.randomUUID()
+  const code    = await generateUniqueCode(supabase)
+
+  const { data: room, error } = await supabase
+    .from('rooms')
+    .insert({
+      code,
+      host_user_id: null,
+      host_guest_id: guestId,
+      status: 'LOBBY',
+      mafia_count: 1,
+      discussion_timer_seconds: 180,
+      voting_timer_seconds: 60,
+      night_timer_seconds: 60,
+      reveal_role_on_death: true,
+      tie_rule: 'NO_ELIMINATION',
+    })
+    .select('id, code')
+    .single()
+
+  if (error || !room) return { generalError: 'Could not create room. Please try again.' }
+
+  await supabase.from('room_players').insert({
+    room_id: room.id,
+    user_id: null,
+    guest_id: guestId,
+    is_guest: true,
+    display_name: displayName,
+    avatar_url: null,
+    is_host: true,
+    is_connected: true,
+  })
+
+  await createGuestSession(guestId, displayName, room.id)
   redirect(`/lobby/${room.code}`)
 }
 
@@ -116,7 +183,6 @@ export async function joinRoom(
   if (!room) return { generalError: 'Room not found. Check the code and try again.' }
   if (room.status !== 'LOBBY') return { generalError: 'This game has already started.' }
 
-  // Already in room?
   const { data: existing } = await supabase
     .from('room_players')
     .select('id')
@@ -137,7 +203,9 @@ export async function joinRoom(
   const { error } = await supabase.from('room_players').insert({
     room_id: room.id,
     user_id: session.userId,
-    display_name: user.full_name,
+    guest_id: null,
+    is_guest: false,
+    display_name: user.full_name as string,
     avatar_url: user.avatar_url ?? null,
     is_host: false,
     is_connected: true,
@@ -149,59 +217,71 @@ export async function joinRoom(
 }
 
 export async function leaveRoom(roomCode: string): Promise<void> {
-  const session = await getSession()
-  if (!session?.userId) redirect('/login')
+  const identity = await getPlayerIdentity()
+  if (!identity) redirect('/')
 
   const supabase = createServiceClient()
   const { data: room } = await supabase
     .from('rooms')
-    .select('id, host_user_id, status')
+    .select('id, host_user_id, host_guest_id, status')
     .eq('code', roomCode)
     .maybeSingle()
 
-  if (!room || room.status !== 'LOBBY') redirect('/dashboard')
+  if (!room || room.status !== 'LOBBY') {
+    redirect(identity.userId ? '/dashboard' : '/')
+  }
 
-  await supabase
-    .from('room_players')
-    .delete()
-    .eq('room_id', room.id)
-    .eq('user_id', session.userId)
+  // Remove this player from room_players
+  if (identity.userId) {
+    await supabase.from('room_players').delete()
+      .eq('room_id', room.id).eq('user_id', identity.userId)
+  } else if (identity.guestId) {
+    await supabase.from('room_players').delete()
+      .eq('room_id', room.id).eq('guest_id', identity.guestId)
+  }
 
   const { data: remaining } = await supabase
     .from('room_players')
-    .select('user_id')
+    .select('user_id, guest_id')
     .eq('room_id', room.id)
     .order('joined_at', { ascending: true })
 
   if (!remaining || remaining.length === 0) {
     await supabase.from('rooms').delete().eq('id', room.id)
-  } else if (room.host_user_id === session.userId) {
-    const newHostId = remaining[0].user_id
-    await supabase.from('rooms').update({ host_user_id: newHostId }).eq('id', room.id)
-    await supabase
-      .from('room_players')
-      .update({ is_host: true })
-      .eq('room_id', room.id)
-      .eq('user_id', newHostId)
+  } else if (identityIsHost(room as { host_user_id: string | null; host_guest_id: string | null }, identity)) {
+    // Promote first remaining player to host
+    const next = remaining[0] as { user_id: string | null; guest_id: string | null }
+    await supabase.from('rooms').update({
+      host_user_id:  next.user_id  ?? null,
+      host_guest_id: next.guest_id ?? null,
+    }).eq('id', room.id)
+
+    if (next.user_id) {
+      await supabase.from('room_players').update({ is_host: true })
+        .eq('room_id', room.id).eq('user_id', next.user_id)
+    } else if (next.guest_id) {
+      await supabase.from('room_players').update({ is_host: true })
+        .eq('room_id', room.id).eq('guest_id', next.guest_id)
+    }
   }
 
-  redirect('/dashboard')
+  redirect(identity.userId ? '/dashboard' : '/')
 }
 
 export async function updateSettings(
   state: RoomActionState,
   formData: FormData,
 ): Promise<RoomActionState> {
-  const session = await getSession()
-  if (!session?.userId) redirect('/login')
+  const identity = await getPlayerIdentity()
+  if (!identity) redirect('/')
 
   const roomCode = formData.get('roomCode') as string
 
   const raw = {
-    mafiaCount: formData.get('mafiaCount'),
-    discussionTimerSeconds: formData.get('discussionTimerSeconds'),
-    votingTimerSeconds: formData.get('votingTimerSeconds'),
-    nightTimerSeconds: formData.get('nightTimerSeconds'),
+    mafiaCount:              formData.get('mafiaCount'),
+    discussionTimerSeconds:  formData.get('discussionTimerSeconds'),
+    votingTimerSeconds:      formData.get('votingTimerSeconds'),
+    nightTimerSeconds:       formData.get('nightTimerSeconds'),
   }
 
   const result = updateSettingsSchema.safeParse(raw)
@@ -214,23 +294,23 @@ export async function updateSettings(
 
   const { data: room } = await supabase
     .from('rooms')
-    .select('id, host_user_id')
+    .select('id, host_user_id, host_guest_id')
     .eq('code', roomCode)
     .maybeSingle()
 
-  if (!room) redirect('/dashboard')
-  if (room.host_user_id !== session.userId) {
+  if (!room) redirect('/')
+  if (!identityIsHost(room as { host_user_id: string | null; host_guest_id: string | null }, identity)) {
     return { generalError: 'Only the host can update settings.' }
   }
 
   const { error } = await supabase
     .from('rooms')
     .update({
-      mafia_count: result.data.mafiaCount,
+      mafia_count:              result.data.mafiaCount,
       discussion_timer_seconds: result.data.discussionTimerSeconds,
-      voting_timer_seconds: result.data.votingTimerSeconds,
-      night_timer_seconds: result.data.nightTimerSeconds,
-      reveal_role_on_death: revealRoleOnDeath,
+      voting_timer_seconds:     result.data.votingTimerSeconds,
+      night_timer_seconds:      result.data.nightTimerSeconds,
+      reveal_role_on_death:     revealRoleOnDeath,
     })
     .eq('id', room.id)
 

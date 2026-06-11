@@ -38,8 +38,11 @@ const NIGHT_OPTIONS = [
 
 export default function LobbyView({ room, players, currentUserId, currentGuestId }: Props) {
   const router = useRouter()
-  // Determine if the current player is the host (only authenticated users can be host)
-  const isHost = !!currentUserId && (players.find((p) => p.user_id === currentUserId)?.is_host ?? false)
+  // Host = room.host_user_id matches currentUserId OR room.host_guest_id matches currentGuestId
+  const roomTyped = room as typeof room & { host_guest_id?: string | null }
+  const isHost =
+    (!!currentUserId  && room.host_user_id  === currentUserId) ||
+    (!!currentGuestId && roomTyped.host_guest_id === currentGuestId)
   const isMe = (p: RoomPlayerRow) =>
     (currentUserId  && p.user_id  === currentUserId) ||
     (currentGuestId && (p as RoomPlayerRow & { guest_id?: string }).guest_id === currentGuestId)

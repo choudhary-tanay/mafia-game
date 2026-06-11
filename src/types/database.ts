@@ -33,7 +33,8 @@ export type TieRule = 'NO_ELIMINATION'
 export type RoomRow = {
   id: string
   code: string
-  host_user_id: string
+  host_user_id: string | null   // null when host is a guest
+  host_guest_id: string | null  // set when host is a guest
   status: RoomStatus
   mafia_count: number
   discussion_timer_seconds: number

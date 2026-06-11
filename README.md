@@ -307,6 +307,16 @@ create unique index if not exists pgs_game_user  on public.player_game_stats (ga
 create unique index if not exists pgs_game_guest on public.player_game_stats (game_id, guest_id) where guest_id is not null;
 ```
 
+### 3g. Guest room creation — make host_user_id nullable
+
+Run this as a **seventh** query in the SQL Editor:
+
+```sql
+-- Allow guests to be room hosts
+alter table public.rooms alter column host_user_id drop not null;
+alter table public.rooms add column if not exists host_guest_id uuid;
+```
+
 ### 4. Get your API keys
 
 In the Supabase dashboard, go to **Project Settings → API**.

@@ -28,18 +28,22 @@ import type { Role, WinCondition } from '@/types/database'
 // buildRoleList is imported from lib/game-engine.ts (exported for testing)
 
 export async function startGame(roomCode: string): Promise<void> {
-  const session = await getSession()
-  if (!session?.userId) redirect('/login')
+  const identity = await getPlayerIdentity()
+  if (!identity) redirect(`/join/${roomCode}`)
   const supabase = createServiceClient()
 
   const { data: room } = await supabase
     .from('rooms')
-    .select('id, host_user_id, status, mafia_count')
+    .select('id, host_user_id, host_guest_id, status, mafia_count')
     .eq('code', roomCode)
     .maybeSingle()
 
   if (!room || room.status !== 'LOBBY') redirect(`/lobby/${roomCode}`)
-  if (room.host_user_id !== session.userId) redirect(`/lobby/${roomCode}`)
+
+  const isHost =
+    (identity.userId  && room.host_user_id  === identity.userId) ||
+    (identity.guestId && room.host_guest_id === identity.guestId)
+  if (!isHost) redirect(`/lobby/${roomCode}`)
 
   const { data: players } = await supabase
     .from('room_players')
@@ -82,8 +86,8 @@ export async function startGame(roomCode: string): Promise<void> {
 
 // Begin Night: ROLE_REVEAL or VOTE_RESOLUTION → NIGHT_ACTIONS_OPEN + new round
 export async function beginNight(gameId: string): Promise<void> {
-  const session = await getSession()
-  if (!session?.userId) redirect('/login')
+  const identity = await getPlayerIdentity()
+  if (!identity) redirect('/')
   const supabase = createServiceClient()
 
   const { data: game } = await supabase
@@ -92,25 +96,28 @@ export async function beginNight(gameId: string): Promise<void> {
     .eq('id', gameId)
     .maybeSingle()
 
-  if (!game) redirect('/dashboard')
+  if (!game) redirect('/')
 
   // Security: only a participant can advance
   const { data: me } = await supabase
     .from('game_players')
     .select('role')
     .eq('game_id', gameId)
-    .eq('user_id', session.userId)
+    .match(playerFilter(identity))
     .maybeSingle()
-  if (!me) redirect('/dashboard')
+  if (!me) redirect('/')
 
-  // Host check: only host (room host) can advance from ROLE_REVEAL
+  // Host check: only the room host can begin night
   const { data: room } = await supabase
     .from('rooms')
-    .select('host_user_id, night_timer_seconds')
+    .select('host_user_id, host_guest_id, night_timer_seconds')
     .eq('id', game.room_id)
     .single()
 
-  if (room?.host_user_id !== session.userId) return
+  const isHost =
+    (identity.userId  && room?.host_user_id  === identity.userId) ||
+    (identity.guestId && room?.host_guest_id === identity.guestId)
+  if (!isHost) return
 
   const nextRound = game.current_round_number + 1
 
@@ -608,8 +615,8 @@ export async function beginNextNight(gameId: string): Promise<void> {
 export async function endDiscussionEarly(
   gameId: string,
 ): Promise<{ error?: string }> {
-  const session = await getSession()
-  if (!session?.userId) return { error: 'Not authenticated.' }
+  const identity = await getPlayerIdentity()
+  if (!identity) return { error: 'Not authenticated.' }
 
   const supabase = createServiceClient()
 
@@ -624,11 +631,14 @@ export async function endDiscussionEarly(
 
   const { data: room } = await supabase
     .from('rooms')
-    .select('host_user_id, voting_timer_seconds')
+    .select('host_user_id, host_guest_id, voting_timer_seconds')
     .eq('id', game.room_id)
     .single()
 
-  if (!room || room.host_user_id !== session.userId) {
+  const isHost =
+    (identity.userId  && room?.host_user_id  === identity.userId) ||
+    (identity.guestId && room?.host_guest_id === identity.guestId)
+  if (!room || !isHost) {
     return { error: 'Only the host can end discussion.' }
   }
 
