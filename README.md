@@ -165,6 +165,68 @@ create trigger on_game_players_updated
   for each row execute procedure public.handle_updated_at();
 ```
 
+### 3d. Phase 4 — Game engine tables
+
+Run this as a **fourth** query in the SQL Editor:
+
+```sql
+-- Add phase deadline to games
+alter table public.games add column if not exists phase_deadline timestamptz;
+
+-- Rounds
+create table public.rounds (
+  id           uuid default gen_random_uuid() primary key,
+  game_id      uuid not null references public.games(id) on delete cascade,
+  round_number integer not null,
+  phase        text not null,
+  started_at   timestamptz default now() not null,
+  ended_at     timestamptz,
+  unique(game_id, round_number)
+);
+alter table public.rounds enable row level security;
+
+-- Night actions (Mafia kill / Doctor save / Detective check)
+create table public.night_actions (
+  id             uuid default gen_random_uuid() primary key,
+  game_id        uuid not null references public.games(id) on delete cascade,
+  round_id       uuid not null references public.rounds(id) on delete cascade,
+  actor_user_id  uuid not null references public.users(id),
+  action_type    text not null,
+  target_user_id uuid references public.users(id),
+  submitted_at   timestamptz default now() not null,
+  unique(round_id, actor_user_id, action_type)
+);
+alter table public.night_actions enable row level security;
+
+-- Day votes
+create table public.votes (
+  id              uuid default gen_random_uuid() primary key,
+  game_id         uuid not null references public.games(id) on delete cascade,
+  round_id        uuid not null references public.rounds(id) on delete cascade,
+  voter_user_id   uuid not null references public.users(id),
+  target_user_id  uuid references public.users(id),
+  submitted_at    timestamptz default now() not null,
+  unique(round_id, voter_user_id)
+);
+alter table public.votes enable row level security;
+
+-- Announcement feed
+create table public.game_events (
+  id                uuid default gen_random_uuid() primary key,
+  game_id           uuid not null references public.games(id) on delete cascade,
+  round_id          uuid references public.rounds(id),
+  event_type        text not null,
+  player_id         uuid references public.users(id),
+  target_player_id  uuid references public.users(id),
+  visibility        text not null default 'PUBLIC',
+  recipient_user_id uuid references public.users(id),
+  message           text not null,
+  metadata          jsonb,
+  created_at        timestamptz default now() not null
+);
+alter table public.game_events enable row level security;
+```
+
 ### 4. Get your API keys
 
 In the Supabase dashboard, go to **Project Settings → API**.

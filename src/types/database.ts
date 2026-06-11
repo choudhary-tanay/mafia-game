@@ -61,7 +61,6 @@ export type RoomPlayerRow = {
 export type Role = 'MAFIA' | 'DOCTOR' | 'DETECTIVE' | 'VILLAGER'
 export type GamePhase =
   | 'ROLE_REVEAL'
-  | 'NIGHT_STARTED'
   | 'NIGHT_ACTIONS_OPEN'
   | 'NIGHT_RESOLUTION'
   | 'DAY_ANNOUNCEMENT'
@@ -77,6 +76,7 @@ export type GameRow = {
   current_phase: GamePhase
   current_round_number: number
   winning_team: string | null
+  phase_deadline: string | null
   started_at: string
   ended_at: string | null
   created_at: string
@@ -96,3 +96,69 @@ export type GamePlayerRow = {
   created_at: string
   updated_at: string
 }
+
+// ─── Phase 4 ─────────────────────────────────────────────────────────────────
+
+export type RoundRow = {
+  id: string
+  game_id: string
+  round_number: number
+  phase: string
+  started_at: string
+  ended_at: string | null
+}
+
+export type NightActionType = 'MAFIA_KILL' | 'DOCTOR_SAVE' | 'DETECTIVE_CHECK'
+
+export type NightActionRow = {
+  id: string
+  game_id: string
+  round_id: string
+  actor_user_id: string
+  action_type: NightActionType
+  target_user_id: string | null
+  submitted_at: string
+}
+
+export type VoteRow = {
+  id: string
+  game_id: string
+  round_id: string
+  voter_user_id: string
+  target_user_id: string | null
+  submitted_at: string
+}
+
+export type GameEventVisibility = 'PUBLIC' | 'PRIVATE_TO_PLAYER'
+
+export type GameEventRow = {
+  id: string
+  game_id: string
+  round_id: string | null
+  event_type: string
+  player_id: string | null
+  target_player_id: string | null
+  visibility: GameEventVisibility
+  recipient_user_id: string | null
+  message: string
+  metadata: Record<string, unknown> | null
+  created_at: string
+}
+
+// ─── Shared view types (passed from server → client) ─────────────────────────
+
+export type PublicPlayer = {
+  user_id: string
+  display_name: string
+  is_alive: boolean
+  role?: Role  // only present if dead + revealRoleOnDeath
+}
+
+export type Announcement = {
+  id: string
+  message: string
+  event_type: string
+  created_at: string
+}
+
+export type WinCondition = 'VILLAGE' | 'MAFIA' | null

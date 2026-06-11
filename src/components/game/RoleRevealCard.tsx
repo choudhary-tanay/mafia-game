@@ -1,13 +1,17 @@
 'use client'
 
 import { useState } from 'react'
+import { beginNight } from '@/app/actions/game'
 import type { Role, GamePhase } from '@/types/database'
+import Button from '@/components/ui/Button'
 
 type Props = {
   role: Role
   mafiaTeammates: string[]
   players: { name: string; isMe: boolean }[]
   phase: GamePhase
+  gameId: string
+  isHost: boolean
 }
 
 const ROLE_CONFIG: Record<
@@ -52,7 +56,7 @@ const ROLE_CONFIG: Record<
   },
 }
 
-export default function RoleRevealCard({ role, mafiaTeammates, players, phase }: Props) {
+export default function RoleRevealCard({ role, mafiaTeammates, players, phase, gameId, isHost }: Props) {
   const [acknowledged, setAcknowledged] = useState(false)
   const cfg = ROLE_CONFIG[role]
 
@@ -135,16 +139,20 @@ export default function RoleRevealCard({ role, mafiaTeammates, players, phase }:
 
       <main className="flex-1 px-4 py-10">
         <div className="mx-auto max-w-2xl space-y-8">
-          <div className="text-center">
-            <p className="text-xs font-semibold uppercase tracking-widest text-accent">
-              Phase: {phase.replace(/_/g, ' ')}
-            </p>
-            <h1 className="mt-2 text-2xl font-bold text-text-primary">
+          <div className="text-center space-y-3">
+            <h1 className="text-2xl font-bold text-text-primary">
               All players have received their roles
             </h1>
-            <p className="mt-2 text-sm text-text-muted">
-              The game engine launches in Phase 4. For now, this is a placeholder.
+            <p className="text-sm text-text-muted">
+              Waiting for the host to begin Night 1.
             </p>
+            {isHost && (
+              <form action={beginNight.bind(null, gameId)}>
+                <Button type="submit" className="mt-2 px-8 py-3">
+                  Begin Night 1
+                </Button>
+              </form>
+            )}
           </div>
 
           {/* Player list — names only, no roles shown */}
@@ -168,9 +176,6 @@ export default function RoleRevealCard({ role, mafiaTeammates, players, phase }:
             </ul>
           </div>
 
-          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-center text-sm text-amber-400">
-            Night/Day game loop, voting, and win detection coming in Phase 4.
-          </div>
         </div>
       </main>
     </div>
