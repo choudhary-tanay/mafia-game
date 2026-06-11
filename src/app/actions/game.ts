@@ -6,6 +6,7 @@ import { getSession } from '@/lib/session'
 import { getPlayerIdentity, playerFilter, type PlayerIdentity } from '@/lib/identity'
 import { validateLobby } from '@/lib/lobby'
 import { computeAndPersistScores } from '@/lib/scoring'
+import { broadcastGameUpdate } from '@/lib/realtime'
 import {
   buildRoleList,
   checkWinCondition,
@@ -133,6 +134,8 @@ export async function beginNight(gameId: string): Promise<void> {
 
   await addEvent(supabase, gameId, round.id, 'NIGHT_STARTED', 'PUBLIC', null,
     `Night ${nextRound} has begun. The village falls asleep.`)
+
+  await broadcastGameUpdate(gameId, 'phase_changed', { phase: 'NIGHT_ACTIONS_OPEN' })
 }
 
 // Submit night action (Mafia kill / Doctor save / Detective check)
@@ -321,6 +324,7 @@ export async function maybeAdvancePhase(gameId: string): Promise<boolean> {
       await addEvent(supabase, gameId, round.id, 'VOTING_STARTED', 'PUBLIC', null,
         'Voting has started. Cast your vote before time runs out.')
     }
+    await broadcastGameUpdate(gameId, 'phase_changed', { phase: 'VOTING' })
     return true
   }
   if (phase === 'VOTING') {
@@ -338,14 +342,13 @@ export async function maybeAdvancePhase(gameId: string): Promise<boolean> {
 
     const nextRound = game.current_round_number + 1
 
-    // Atomic: only create round if still in VOTE_RESOLUTION
     const { data: newRound, error: roundErr } = await supabase
       .from('rounds')
       .insert({ game_id: gameId, round_number: nextRound, phase: 'NIGHT_ACTIONS_OPEN' })
       .select('id')
       .single()
 
-    if (roundErr || !newRound) return false // round already created by another request
+    if (roundErr || !newRound) return false
 
     const { error: advanceErr } = await supabase
       .from('games')
@@ -361,6 +364,7 @@ export async function maybeAdvancePhase(gameId: string): Promise<boolean> {
     if (!advanceErr && newRound) {
       await addEvent(supabase, gameId, newRound.id, 'NIGHT_STARTED', 'PUBLIC', null,
         `Night ${nextRound} begins. The village falls asleep.`)
+      await broadcastGameUpdate(gameId, 'phase_changed', { phase: 'NIGHT_ACTIONS_OPEN' })
     }
     return true
   }
@@ -480,6 +484,8 @@ async function resolveNight(
 
   await addEvent(supabase, gameId, roundId, 'DISCUSSION_STARTED', 'PUBLIC', null,
     'The village wakes up. Discussion has begun.')
+
+  await broadcastGameUpdate(gameId, 'phase_changed', { phase: 'DISCUSSION' })
 }
 
 async function resolveVote(
@@ -550,6 +556,8 @@ async function resolveVote(
     .from('games')
     .update({ current_phase: 'VOTE_RESOLUTION', phase_deadline: futureDeadline(5) })
     .eq('id', gameId)
+
+  await broadcastGameUpdate(gameId, 'phase_changed', { phase: 'VOTE_RESOLUTION' })
 }
 
 // Called from game page after VOTE_RESOLUTION deadline — advances to next night
@@ -595,6 +603,63 @@ export async function beginNextNight(gameId: string): Promise<void> {
     `Night ${nextRound} begins. The village falls asleep again.`)
 }
 
+// ─── Host: end discussion early ───────────────────────────────────────────────
+
+export async function endDiscussionEarly(
+  gameId: string,
+): Promise<{ error?: string }> {
+  const session = await getSession()
+  if (!session?.userId) return { error: 'Not authenticated.' }
+
+  const supabase = createServiceClient()
+
+  const { data: game } = await supabase
+    .from('games')
+    .select('id, room_id, current_phase, current_round_number')
+    .eq('id', gameId)
+    .maybeSingle()
+
+  if (!game) return { error: 'Game not found.' }
+  if (game.current_phase !== 'DISCUSSION') return { error: 'Not in discussion phase.' }
+
+  const { data: room } = await supabase
+    .from('rooms')
+    .select('host_user_id, voting_timer_seconds')
+    .eq('id', game.room_id)
+    .single()
+
+  if (!room || room.host_user_id !== session.userId) {
+    return { error: 'Only the host can end discussion.' }
+  }
+
+  const { data: round } = await supabase
+    .from('rounds')
+    .select('id')
+    .eq('game_id', gameId)
+    .eq('round_number', game.current_round_number)
+    .maybeSingle()
+
+  const { error } = await supabase
+    .from('games')
+    .update({
+      current_phase: 'VOTING',
+      status: 'VOTING',
+      phase_deadline: futureDeadline(room.voting_timer_seconds ?? 60),
+    })
+    .eq('id', gameId)
+    .eq('current_phase', 'DISCUSSION') // atomic guard
+
+  if (error) return { error: 'Could not end discussion.' }
+
+  if (round) {
+    await addEvent(supabase, gameId, round.id, 'VOTING_STARTED', 'PUBLIC', null,
+      'The host ended discussion early. Voting has started — cast your vote.')
+  }
+
+  await broadcastGameUpdate(gameId, 'phase_changed', { phase: 'VOTING' })
+  return {}
+}
+
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 async function endGame(
@@ -625,6 +690,8 @@ async function endGame(
   if (winner) {
     await computeAndPersistScores(supabase, gameId, winner)
   }
+
+  await broadcastGameUpdate(gameId, 'phase_changed', { phase: 'GAME_OVER', winner })
 }
 
 async function addEvent(

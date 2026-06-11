@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { beginNight, beginNextNight } from '@/app/actions/game'
+import { beginNight, beginNextNight, endDiscussionEarly } from '@/app/actions/game'
+import { getBrowserClient } from '@/lib/supabase/client'
 import AnnouncementFeed from './AnnouncementFeed'
 import CircularTimer from './CircularTimer'
 import PhaseBanner from './PhaseBanner'
@@ -73,9 +74,23 @@ export default function GameView(props: GameViewProps) {
   } = props
 
   const router = useRouter()
+  const [endingDiscussion, startEndDiscussion] = useTransition()
 
+  // ── Primary sync: Supabase Realtime broadcast ────────────────────────────
   useEffect(() => {
-    const id = setInterval(() => router.refresh(), 3000)
+    const supabase = getBrowserClient()
+    const channel = supabase
+      .channel(`game:${gameId}`)
+      .on('broadcast', { event: 'phase_changed' }, () => {
+        router.refresh()
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [gameId, router])
+
+  // ── Fallback: poll every 5 s in case a broadcast is missed ───────────────
+  useEffect(() => {
+    const id = setInterval(() => router.refresh(), 5000)
     return () => clearInterval(id)
   }, [router])
 
@@ -181,7 +196,7 @@ export default function GameView(props: GameViewProps) {
 
               {/* Discussion */}
               {(phase === 'DAY_ANNOUNCEMENT' || phase === 'DISCUSSION') && (
-                <div className="rounded-xl border border-amber-700/30 bg-amber-950/10 p-5 space-y-2 animate-fade-up">
+                <div className="rounded-xl border border-amber-700/30 bg-amber-950/10 p-5 space-y-3 animate-fade-up">
                   <p className="text-sm font-semibold text-amber-300">
                     {phase === 'DAY_ANNOUNCEMENT' ? '☀️ Morning has arrived' : '💬 Discussion phase'}
                   </p>
@@ -190,6 +205,20 @@ export default function GameView(props: GameViewProps) {
                       ? 'Debate who the Mafia might be. Voting starts when the timer ends.'
                       : 'You are eliminated. Watch and reflect.'}
                   </p>
+                  {/* Host-only: end discussion early */}
+                  {isHost && phase === 'DISCUSSION' && (
+                    <button
+                      onClick={() =>
+                        startEndDiscussion(async () => {
+                          await endDiscussionEarly(gameId)
+                        })
+                      }
+                      disabled={endingDiscussion}
+                      className="w-full rounded-lg border border-amber-600/40 bg-amber-900/20 px-4 py-2 text-sm font-semibold text-amber-300 hover:bg-amber-900/40 transition-colors disabled:opacity-50"
+                    >
+                      {endingDiscussion ? 'Starting voting…' : 'End Discussion & Start Voting'}
+                    </button>
+                  )}
                 </div>
               )}
 
