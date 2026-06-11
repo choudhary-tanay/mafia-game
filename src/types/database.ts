@@ -48,10 +48,12 @@ export type RoomRow = {
 export type RoomPlayerRow = {
   id: string
   room_id: string
-  user_id: string
+  user_id: string | null   // null for guests
+  guest_id: string | null  // null for auth users
   display_name: string
   avatar_url: string | null
   is_host: boolean
+  is_guest: boolean
   is_connected: boolean
   joined_at: string
 }

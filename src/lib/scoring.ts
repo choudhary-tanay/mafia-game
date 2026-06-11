@@ -35,7 +35,7 @@ export async function computeAndPersistScores(
   ] = await Promise.all([
     supabase
       .from('game_players')
-      .select('user_id, role, is_alive, death_round_number')
+      .select('user_id, guest_id, is_guest, role, is_alive, death_round_number')
       .eq('game_id', gameId),
     supabase
       .from('night_actions')
@@ -105,10 +105,15 @@ export async function computeAndPersistScores(
       correctVotes,
     })
 
-    // ── Insert stat row (unique(game_id, user_id) protects from duplicates) ──
+    const playerIsGuest = !!(player as { is_guest?: boolean }).is_guest
+    const playerGuestId = (player as { guest_id?: string | null }).guest_id ?? null
+
+    // ── Insert stat row ───────────────────────────────────────────────────────
     await supabase.from('player_game_stats').insert({
       game_id: gameId,
-      user_id: player.user_id,
+      user_id:  playerIsGuest ? null : player.user_id,
+      guest_id: playerIsGuest ? playerGuestId : null,
+      is_guest: playerIsGuest,
       role: player.role,
       team,
       won: isWinner,
@@ -119,6 +124,9 @@ export async function computeAndPersistScores(
       successful_detective_finds: detectiveFinds,
       score_delta: delta,
     })
+
+    // Guests don't have a profile — skip the aggregate update
+    if (playerIsGuest || !player.user_id) continue
 
     // ── Atomic user aggregate update ──────────────────────────────────────────
     // Fetch current values, then write the new totals.

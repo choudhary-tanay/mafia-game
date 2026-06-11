@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import type { RoomRow, RoomPlayerRow } from '@/types/database'
 import { validateLobby, recommendedMafiaCount, formatTimer } from '@/lib/lobby'
 import { leaveRoom, updateSettings } from '@/app/actions/room'
+import { leaveRoomAsGuest } from '@/app/actions/guest'
 import { startGame } from '@/app/actions/game'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
@@ -13,7 +14,8 @@ import Select from '@/components/ui/Select'
 type Props = {
   room: RoomRow
   players: RoomPlayerRow[]
-  currentUserId: string
+  currentUserId: string | null
+  currentGuestId?: string | null
 }
 
 const DISCUSSION_OPTIONS = [
@@ -34,9 +36,13 @@ const NIGHT_OPTIONS = [
   { value: '120', label: '2 minutes' },
 ]
 
-export default function LobbyView({ room, players, currentUserId }: Props) {
+export default function LobbyView({ room, players, currentUserId, currentGuestId }: Props) {
   const router = useRouter()
-  const isHost = players.find((p) => p.user_id === currentUserId)?.is_host ?? false
+  // Determine if the current player is the host (only authenticated users can be host)
+  const isHost = !!currentUserId && (players.find((p) => p.user_id === currentUserId)?.is_host ?? false)
+  const isMe = (p: RoomPlayerRow) =>
+    (currentUserId  && p.user_id  === currentUserId) ||
+    (currentGuestId && (p as RoomPlayerRow & { guest_id?: string }).guest_id === currentGuestId)
   const validation = validateLobby(players.length, room.mafia_count)
   const recommended = recommendedMafiaCount(players.length)
   const inviteUrl =
@@ -44,7 +50,10 @@ export default function LobbyView({ room, players, currentUserId }: Props) {
       ? `${window.location.origin}/lobby/${room.code}`
       : `/lobby/${room.code}`
 
-  const leaveAction = leaveRoom.bind(null, room.code)
+  // Guests use a different leave action
+  const leaveAction = currentGuestId
+    ? leaveRoomAsGuest.bind(null, room.code)
+    : leaveRoom.bind(null, room.code)
   const startGameAction = startGame.bind(null, room.code)
   const [settingsState, settingsAction, settingsPending] = useActionState(
     updateSettings,
@@ -121,8 +130,11 @@ export default function LobbyView({ room, players, currentUserId }: Props) {
                       {p.display_name.charAt(0).toUpperCase()}
                     </div>
                     <span className="flex-1 text-sm text-text-primary">{p.display_name}</span>
-                    {p.user_id === currentUserId && (
-                      <span className="text-xs text-text-muted">(you)</span>
+                    {isMe(p) && <span className="text-xs text-text-muted">(you)</span>}
+                    {(p as RoomPlayerRow & { is_guest?: boolean }).is_guest && (
+                      <span className="rounded-full border border-text-muted/30 px-2 py-0.5 text-xs text-text-muted">
+                        Guest
+                      </span>
                     )}
                     {p.is_host && (
                       <span className="rounded-full bg-accent/20 px-2 py-0.5 text-xs font-semibold text-accent">

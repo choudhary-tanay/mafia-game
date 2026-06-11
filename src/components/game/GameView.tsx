@@ -19,6 +19,7 @@ export type GameViewProps = {
   phase: GamePhase
   roundNumber: number
   phaseDeadline: string | null
+  isGuest?: boolean
   winningTeam: string | null
   myRole: Role
   myIsAlive: boolean
@@ -68,6 +69,7 @@ export default function GameView(props: GameViewProps) {
     myRole, myIsAlive, isHost, currentUserId, players,
     announcements, detectiveResult, myNightActionTargetId,
     mafiaCurrentTarget, myVoteTargetId, voteCounts,
+    isGuest = false,
   } = props
 
   const router = useRouter()
@@ -224,12 +226,28 @@ export default function GameView(props: GameViewProps) {
                       ? 'All Mafia players have been eliminated. The village is safe.'
                       : 'The Mafia now outnumber and control the village.'}
                   </p>
-                  <a
-                    href="/dashboard"
-                    className="inline-block mt-2 rounded-lg bg-accent px-6 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover transition-colors"
-                  >
-                    Back to dashboard
-                  </a>
+                  {isGuest ? (
+                    <div className="space-y-2">
+                      <p className="text-xs text-amber-400">
+                        You played as a guest. Your score for this game is temporary.
+                      </p>
+                      <div className="flex flex-col sm:flex-row gap-2 justify-center mt-2">
+                        <a href="/signup" className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover transition-colors">
+                          Create account to save score
+                        </a>
+                        <a href="/" className="rounded-lg border border-border px-5 py-2.5 text-sm text-text-muted hover:text-text-primary transition-colors">
+                          Continue as guest
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <a
+                      href="/dashboard"
+                      className="inline-block mt-2 rounded-lg bg-accent px-6 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover transition-colors"
+                    >
+                      Back to dashboard
+                    </a>
+                  )}
                 </div>
               )}
 

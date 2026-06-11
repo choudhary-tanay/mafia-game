@@ -1,5 +1,6 @@
 import { notFound, redirect } from 'next/navigation'
 import { getSession } from '@/lib/session'
+import { getGuestSession } from '@/lib/guest-session'
 import { createServiceClient } from '@/lib/supabase/server'
 import { maybeAdvancePhase } from '@/app/actions/game'
 import RoleRevealCard from '@/components/game/RoleRevealCard'
@@ -10,8 +11,12 @@ export const metadata = { title: 'Game — Mafia' }
 
 export default async function GamePage({ params }: { params: Promise<{ gameId: string }> }) {
   const { gameId } = await params
-  const session = await getSession()
-  if (!session?.userId) redirect('/login')
+
+  // Resolve identity — authenticated user or guest
+  const [userSession, guestSession] = await Promise.all([getSession(), getGuestSession()])
+  const currentUserId  = userSession?.userId ?? null
+  const currentGuestId = guestSession?.guestId ?? null
+  if (!currentUserId && !currentGuestId) redirect('/')
 
   // Lazy phase advancement (deadline enforcement)
   await maybeAdvancePhase(gameId)
@@ -29,15 +34,18 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
   const game = gameRaw as GameRow
 
   // ── My player ─────────────────────────────────────────────────────────────
-  const { data: myPlayerRaw } = await supabase
+  // Support both authenticated (user_id) and guest (guest_id) players
+  let myPlayerQuery = supabase
     .from('game_players')
-    .select('role, is_alive')
+    .select('role, is_alive, user_id, guest_id')
     .eq('game_id', gameId)
-    .eq('user_id', session.userId)
-    .maybeSingle()
+  if (currentUserId) myPlayerQuery = myPlayerQuery.eq('user_id', currentUserId) as typeof myPlayerQuery
+  else               myPlayerQuery = myPlayerQuery.eq('guest_id', currentGuestId!) as typeof myPlayerQuery
 
-  if (!myPlayerRaw) redirect('/dashboard')
-  const myRole = myPlayerRaw.role as Role
+  const { data: myPlayerRaw } = await myPlayerQuery.maybeSingle()
+
+  if (!myPlayerRaw) redirect(currentUserId ? '/dashboard' : '/')
+  const myRole    = myPlayerRaw.role as Role
   const myIsAlive = myPlayerRaw.is_alive as boolean
 
   // ── Room settings ─────────────────────────────────────────────────────────
@@ -47,43 +55,62 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
     .eq('id', game.room_id)
     .single()
 
-  const isHost = room?.host_user_id === session.userId
+  // Guests are never host (only auth users can create rooms)
+  const isHost           = !!currentUserId && room?.host_user_id === currentUserId
   const revealRoleOnDeath = room?.reveal_role_on_death ?? false
 
   // ── Public player list (no roles unless dead + revealRoleOnDeath) ─────────
   const { data: gamePlayers } = await supabase
     .from('game_players')
-    .select('user_id, role, is_alive')
+    .select('user_id, guest_id, role, is_alive, display_name')
     .eq('game_id', gameId)
 
+  // Build display names: prefer game_players.display_name (guests), else room_players lookup
   const { data: roomPlayers } = await supabase
     .from('room_players')
-    .select('user_id, display_name')
+    .select('user_id, guest_id, display_name')
     .eq('room_id', game.room_id)
 
-  const displayMap = new Map(roomPlayers?.map((p) => [p.user_id, p.display_name]) ?? [])
+  const userDisplayMap  = new Map(roomPlayers?.map((p) => [p.user_id,  p.display_name]) ?? [])
+  const guestDisplayMap = new Map(roomPlayers?.map((p) => [p.guest_id, p.display_name]) ?? [])
 
-  const players: PublicPlayer[] = (gamePlayers ?? []).map((gp) => ({
-    user_id: gp.user_id,
-    display_name: displayMap.get(gp.user_id) ?? gp.user_id,
-    is_alive: gp.is_alive,
-    // Only expose role if dead AND reveal_role_on_death is enabled, OR game is over
-    role:
-      (!gp.is_alive && revealRoleOnDeath) || game.current_phase === 'GAME_OVER'
-        ? (gp.role as Role)
-        : undefined,
-  }))
+  // Current player's stable ID for UI highlighting
+  const myStableId = currentUserId ?? currentGuestId ?? ''
+
+  const players: PublicPlayer[] = (gamePlayers ?? []).map((gp) => {
+    const stableId = gp.user_id ?? gp.guest_id ?? gp.user_id
+    const displayName =
+      gp.display_name ??
+      (gp.user_id  ? userDisplayMap.get(gp.user_id)   : null) ??
+      (gp.guest_id ? guestDisplayMap.get(gp.guest_id) : null) ??
+      'Player'
+    return {
+      user_id: stableId ?? '',
+      display_name: displayName,
+      is_alive: gp.is_alive,
+      // Only expose role if dead AND reveal_role_on_death is enabled, OR game is over
+      role:
+        (!gp.is_alive && revealRoleOnDeath) || game.current_phase === 'GAME_OVER'
+          ? (gp.role as Role)
+          : undefined,
+    }
+  })
 
   // ── Mafia teammates (only for Mafia players) ──────────────────────────────
   let mafiaTeammates: string[] = []
   if (myRole === 'MAFIA') {
-    const { data: mafiaRows } = await supabase
-      .from('game_players')
-      .select('user_id')
-      .eq('game_id', gameId)
-      .eq('role', 'MAFIA')
-      .neq('user_id', session.userId)
-    mafiaTeammates = (mafiaRows ?? []).map((r) => displayMap.get(r.user_id) ?? r.user_id)
+    // Fetch other Mafia members — exclude self by user_id or guest_id
+    let mafiaQ = supabase.from('game_players').select('user_id, guest_id, display_name').eq('game_id', gameId).eq('role', 'MAFIA')
+    if (currentUserId)  mafiaQ = mafiaQ.neq('user_id', currentUserId) as typeof mafiaQ
+    if (currentGuestId) mafiaQ = mafiaQ.neq('guest_id', currentGuestId) as typeof mafiaQ
+    const { data: mafiaRows } = await mafiaQ
+    mafiaTeammates = (mafiaRows ?? []).map((r) => {
+      if (r.display_name) return r.display_name as string
+      const name = r.user_id
+        ? (userDisplayMap.get(r.user_id) ?? r.user_id)
+        : (guestDisplayMap.get(r.guest_id) ?? r.guest_id ?? 'Unknown')
+      return name as string
+    })
   }
 
   // ── Current round ─────────────────────────────────────────────────────────
@@ -112,7 +139,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
       .select('message')
       .eq('game_id', gameId)
       .eq('visibility', 'PRIVATE_TO_PLAYER')
-      .eq('recipient_user_id', session.userId)
+      .eq('recipient_user_id', currentUserId ?? currentGuestId ?? '')
       .eq('round_id', round.id)
       .maybeSingle()
     detectiveResult = (privEvent as { message: string } | null)?.message ?? null
@@ -128,7 +155,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
       .from('night_actions')
       .select('target_user_id')
       .eq('round_id', round.id)
-      .eq('actor_user_id', session.userId)
+      .eq(currentUserId ? 'actor_user_id' : 'actor_guest_id', currentUserId ?? currentGuestId ?? '')
       .eq('action_type', actionType)
       .maybeSingle()
     myNightActionTargetId = myAction ? myAction.target_user_id : null
@@ -154,7 +181,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
       .from('votes')
       .select('target_user_id')
       .eq('round_id', round.id)
-      .eq('voter_user_id', session.userId)
+      .eq(currentUserId ? 'voter_user_id' : 'voter_guest_id', currentUserId ?? currentGuestId ?? '')
       .maybeSingle()
     myVoteTargetId = myVote ? myVote.target_user_id : undefined
 
@@ -169,7 +196,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
       }
       voteCounts = [...counts.entries()].map(([uid, count]) => ({
         user_id: uid,
-        display_name: displayMap.get(uid) ?? uid,
+        display_name: userDisplayMap.get(uid) ?? uid,
         count,
       }))
     }
@@ -181,7 +208,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
       <RoleRevealCard
         role={myRole}
         mafiaTeammates={mafiaTeammates}
-        players={players.map((p) => ({ userId: p.user_id, name: p.display_name, isMe: p.user_id === session.userId }))}
+        players={players.map((p) => ({ userId: p.user_id, name: p.display_name, isMe: p.user_id === myStableId }))}
         phase={game.current_phase}
         gameId={gameId}
         isHost={isHost}
@@ -198,7 +225,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
     myRole,
     myIsAlive,
     isHost,
-    currentUserId: session.userId,
+    currentUserId: myStableId,
     players,
     announcements,
     detectiveResult,
@@ -207,6 +234,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
     myVoteTargetId,
     voteCounts,
     revealRoleOnDeath,
+    isGuest: !!currentGuestId,
   }
 
   return <GameView {...viewProps} />

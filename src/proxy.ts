@@ -1,22 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { decrypt } from '@/lib/jwt'
+import { decrypt, decryptGuest } from '@/lib/jwt'
 
-const protectedRoutes = ['/dashboard', '/lobby', '/game', '/profile']
+// Routes that require authenticated user (no guests)
+const userOnlyRoutes = ['/dashboard', '/profile']
+
+// Routes that require any auth (user OR guest)
+const anyAuthRoutes = ['/game']
+
+// Routes that bounce authenticated users away to dashboard
 const publicAuthRoutes = ['/login', '/signup']
+
+// /lobby/* and /join/* are left open — their pages handle auth internally
 
 export default async function proxy(req: NextRequest) {
   const path = req.nextUrl.pathname
-  const isProtected = protectedRoutes.some((r) => path.startsWith(r))
+
+  const isUserOnly = userOnlyRoutes.some((r) => path.startsWith(r))
+  const isAnyAuth  = anyAuthRoutes.some((r) => path.startsWith(r))
   const isPublicAuth = publicAuthRoutes.includes(path)
 
-  const cookie = req.cookies.get('session')?.value
-  const session = await decrypt(cookie)
+  const [userSession, guestSession] = await Promise.all([
+    decrypt(req.cookies.get('session')?.value),
+    decryptGuest(req.cookies.get('guest_session')?.value),
+  ])
 
-  if (isProtected && !session?.userId) {
+  const hasUserAuth  = !!userSession?.userId
+  const hasAnyAuth   = hasUserAuth || !!guestSession?.guestId
+
+  if (isUserOnly && !hasUserAuth) {
     return NextResponse.redirect(new URL('/login', req.nextUrl))
   }
 
-  if (isPublicAuth && session?.userId) {
+  if (isAnyAuth && !hasAnyAuth) {
+    return NextResponse.redirect(new URL('/', req.nextUrl))
+  }
+
+  // Authenticated users bounced from login/signup → dashboard
+  if (isPublicAuth && hasUserAuth) {
     return NextResponse.redirect(new URL('/dashboard', req.nextUrl))
   }
 

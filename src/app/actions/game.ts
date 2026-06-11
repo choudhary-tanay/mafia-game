@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getSession } from '@/lib/session'
+import { getPlayerIdentity, playerFilter, type PlayerIdentity } from '@/lib/identity'
 import { validateLobby } from '@/lib/lobby'
 import { computeAndPersistScores } from '@/lib/scoring'
 import {
@@ -41,7 +42,7 @@ export async function startGame(roomCode: string): Promise<void> {
 
   const { data: players } = await supabase
     .from('room_players')
-    .select('user_id')
+    .select('user_id, guest_id, is_guest, display_name')
     .eq('room_id', room.id)
 
   if (!players || players.length < 4) redirect(`/lobby/${roomCode}`)
@@ -62,7 +63,10 @@ export async function startGame(roomCode: string): Promise<void> {
     players.map((p, i) => ({
       game_id: game.id,
       room_id: room.id,
-      user_id: p.user_id,
+      user_id:      (p as { user_id: string | null }).user_id   ?? null,
+      guest_id:     (p as { guest_id: string | null }).guest_id  ?? null,
+      is_guest:     !!(p as { is_guest: boolean }).is_guest,
+      display_name: (p as { display_name: string }).display_name ?? null,
       role: roles[i],
       is_alive: true,
       survived_to_end: false,
@@ -137,8 +141,8 @@ export async function submitNightAction(
   actionType: 'MAFIA_KILL' | 'DOCTOR_SAVE' | 'DETECTIVE_CHECK',
   targetUserId: string,
 ): Promise<{ error?: string }> {
-  const session = await getSession()
-  if (!session?.userId) return { error: 'Not authenticated.' }
+  const identity = await getPlayerIdentity()
+  if (!identity) return { error: 'Not authenticated.' }
   const supabase = createServiceClient()
 
   const { data: game } = await supabase
@@ -156,20 +160,16 @@ export async function submitNightAction(
     .from('game_players')
     .select('role, is_alive')
     .eq('game_id', gameId)
-    .eq('user_id', session.userId)
+    .match(playerFilter(identity))
     .maybeSingle()
 
   if (!me?.is_alive) return { error: 'Dead players cannot act.' }
 
-  // Validate role matches action type
   const allowed: Record<string, string[]> = {
-    MAFIA_KILL: ['MAFIA'],
-    DOCTOR_SAVE: ['DOCTOR'],
-    DETECTIVE_CHECK: ['DETECTIVE'],
+    MAFIA_KILL: ['MAFIA'], DOCTOR_SAVE: ['DOCTOR'], DETECTIVE_CHECK: ['DETECTIVE'],
   }
   if (!allowed[actionType]?.includes(me.role)) return { error: 'Invalid action for your role.' }
 
-  // Verify target is alive
   const { data: target } = await supabase
     .from('game_players')
     .select('is_alive')
@@ -179,7 +179,6 @@ export async function submitNightAction(
 
   if (!target?.is_alive) return { error: 'Target is not alive.' }
 
-  // Get current round
   const { data: round } = await supabase
     .from('rounds')
     .select('id')
@@ -189,24 +188,25 @@ export async function submitNightAction(
 
   if (!round) return { error: 'Round not found.' }
 
-  // Upsert — Mafia can change their kill choice
+  const conflictCol = identity.userId
+    ? 'round_id,actor_user_id,action_type'
+    : 'round_id,actor_guest_id,action_type'
+
   await supabase.from('night_actions').upsert(
     {
       game_id: gameId,
       round_id: round.id,
-      actor_user_id: session.userId,
+      actor_user_id:  identity.userId  ?? null,
+      actor_guest_id: identity.guestId ?? null,
       action_type: actionType,
       target_user_id: targetUserId,
       submitted_at: new Date().toISOString(),
     },
-    { onConflict: 'round_id,actor_user_id,action_type' },
+    { onConflict: conflictCol },
   )
 
-  // Auto-resolve if all actions in
   const complete = await areNightActionsComplete(supabase, gameId, round.id)
-  if (complete) {
-    await resolveNight(supabase, gameId, round.id)
-  }
+  if (complete) await resolveNight(supabase, gameId, round.id)
 
   return {}
 }
@@ -216,8 +216,8 @@ export async function submitVote(
   gameId: string,
   targetUserId: string | null,
 ): Promise<{ error?: string }> {
-  const session = await getSession()
-  if (!session?.userId) return { error: 'Not authenticated.' }
+  const identity = await getPlayerIdentity()
+  if (!identity) return { error: 'Not authenticated.' }
   const supabase = createServiceClient()
 
   const { data: game } = await supabase
@@ -235,7 +235,7 @@ export async function submitVote(
     .from('game_players')
     .select('is_alive')
     .eq('game_id', gameId)
-    .eq('user_id', session.userId)
+    .match(playerFilter(identity))
     .maybeSingle()
 
   if (!me?.is_alive) return { error: 'Dead players cannot vote.' }
@@ -259,21 +259,22 @@ export async function submitVote(
 
   if (!round) return { error: 'Round not found.' }
 
+  const conflictCol = identity.userId ? 'round_id,voter_user_id' : 'round_id,voter_guest_id'
+
   await supabase.from('votes').upsert(
     {
       game_id: gameId,
       round_id: round.id,
-      voter_user_id: session.userId,
+      voter_user_id:  identity.userId  ?? null,
+      voter_guest_id: identity.guestId ?? null,
       target_user_id: targetUserId,
       submitted_at: new Date().toISOString(),
     },
-    { onConflict: 'round_id,voter_user_id' },
+    { onConflict: conflictCol },
   )
 
   const allIn = await areAllVotesIn(supabase, gameId, round.id)
-  if (allIn) {
-    await resolveVote(supabase, gameId, round.id)
-  }
+  if (allIn) await resolveVote(supabase, gameId, round.id)
 
   return {}
 }

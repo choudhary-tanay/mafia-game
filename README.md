@@ -262,6 +262,51 @@ create table public.player_game_stats (
 alter table public.player_game_stats enable row level security;
 ```
 
+### 3f. Phase 8 — Guest player support
+
+Run this as a **sixth** query in the SQL Editor:
+
+```sql
+-- ── room_players: make user_id nullable, add guest columns ──────────────────
+alter table public.room_players alter column user_id drop not null;
+alter table public.room_players add column if not exists guest_id   uuid;
+alter table public.room_players add column if not exists is_guest   boolean default false not null;
+alter table public.room_players drop constraint if exists room_players_room_id_user_id_key;
+create unique index if not exists rp_room_user  on public.room_players (room_id, user_id)  where user_id  is not null;
+create unique index if not exists rp_room_guest on public.room_players (room_id, guest_id) where guest_id is not null;
+
+-- ── game_players: make user_id nullable, add guest columns + display_name ───
+alter table public.game_players alter column user_id drop not null;
+alter table public.game_players add column if not exists guest_id     uuid;
+alter table public.game_players add column if not exists is_guest     boolean default false not null;
+alter table public.game_players add column if not exists display_name text;
+alter table public.game_players drop constraint if exists game_players_game_id_user_id_key;
+create unique index if not exists gp_game_user  on public.game_players (game_id, user_id)  where user_id  is not null;
+create unique index if not exists gp_game_guest on public.game_players (game_id, guest_id) where guest_id is not null;
+
+-- ── night_actions: make actor_user_id nullable, add actor_guest_id ──────────
+alter table public.night_actions alter column actor_user_id drop not null;
+alter table public.night_actions add column if not exists actor_guest_id uuid;
+alter table public.night_actions drop constraint if exists night_actions_round_id_actor_user_id_action_type_key;
+create unique index if not exists na_round_user  on public.night_actions (round_id, actor_user_id,  action_type) where actor_user_id  is not null;
+create unique index if not exists na_round_guest on public.night_actions (round_id, actor_guest_id, action_type) where actor_guest_id is not null;
+
+-- ── votes: make voter_user_id nullable, add voter_guest_id ──────────────────
+alter table public.votes alter column voter_user_id drop not null;
+alter table public.votes add column if not exists voter_guest_id uuid;
+alter table public.votes drop constraint if exists votes_round_id_voter_user_id_key;
+create unique index if not exists v_round_user  on public.votes (round_id, voter_user_id)  where voter_user_id  is not null;
+create unique index if not exists v_round_guest on public.votes (round_id, voter_guest_id) where voter_guest_id is not null;
+
+-- ── player_game_stats: make user_id nullable, add guest columns ─────────────
+alter table public.player_game_stats alter column user_id drop not null;
+alter table public.player_game_stats add column if not exists guest_id  uuid;
+alter table public.player_game_stats add column if not exists is_guest  boolean default false not null;
+alter table public.player_game_stats drop constraint if exists player_game_stats_game_id_user_id_key;
+create unique index if not exists pgs_game_user  on public.player_game_stats (game_id, user_id)  where user_id  is not null;
+create unique index if not exists pgs_game_guest on public.player_game_stats (game_id, guest_id) where guest_id is not null;
+```
+
 ### 4. Get your API keys
 
 In the Supabase dashboard, go to **Project Settings → API**.

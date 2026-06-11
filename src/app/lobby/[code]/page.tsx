@@ -1,11 +1,11 @@
 import { notFound, redirect } from 'next/navigation'
 import { getSession } from '@/lib/session'
+import { getGuestSession } from '@/lib/guest-session'
 import { createServiceClient } from '@/lib/supabase/server'
-import { joinRoom } from '@/app/actions/room'
 import LobbyView from '@/components/lobby/LobbyView'
 import LobbyRefresh from '@/components/lobby/LobbyRefresh'
+import GuestJoinForm from '@/components/join/GuestJoinForm'
 import type { RoomRow, RoomPlayerRow } from '@/types/database'
-import Button from '@/components/ui/Button'
 
 export async function generateMetadata({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params
@@ -16,8 +16,15 @@ export default async function LobbyPage({ params }: { params: Promise<{ code: st
   const { code } = await params
   const upperCode = code.toUpperCase()
 
-  const session = await getSession()
-  if (!session?.userId) redirect('/login')
+  // Resolve identity — authenticated user or guest
+  const [userSession, guestSession] = await Promise.all([getSession(), getGuestSession()])
+
+  const currentUserId   = userSession?.userId ?? null
+  const currentGuestId  = guestSession?.guestId ?? null
+  const hasAnyAuth      = !!(currentUserId || currentGuestId)
+
+  // No auth at all → redirect to the public join page
+  if (!hasAnyAuth) redirect(`/join/${upperCode}`)
 
   const supabase = createServiceClient()
 
@@ -32,10 +39,10 @@ export default async function LobbyPage({ params }: { params: Promise<{ code: st
   const typedRoom = room as RoomRow
 
   if (typedRoom.status === 'ENDED') {
-    redirect('/dashboard')
+    redirect(currentUserId ? '/dashboard' : '/')
   }
 
-  // Room is ACTIVE — find the current game and send the player there
+  // Active room → find the game and redirect there
   if (typedRoom.status === 'ACTIVE') {
     const { data: activeGame } = await supabase
       .from('games')
@@ -46,81 +53,50 @@ export default async function LobbyPage({ params }: { params: Promise<{ code: st
       .maybeSingle()
 
     if (activeGame) redirect(`/game/${activeGame.id}`)
-    else redirect('/dashboard')
+    else redirect(currentUserId ? '/dashboard' : '/')
   }
 
-  // Check if user is in the room
-  const { data: mySlot } = await supabase
-    .from('room_players')
-    .select('id')
-    .eq('room_id', typedRoom.id)
-    .eq('user_id', session.userId)
-    .maybeSingle()
-
-  // Not in the room yet — show invite/join page
-  if (!mySlot) {
-    if (typedRoom.status !== 'LOBBY') {
-      return (
-        <main className="flex flex-1 items-center justify-center px-4">
-          <div className="w-full max-w-sm rounded-xl border border-border bg-surface p-8 text-center">
-            <p className="text-lg font-semibold text-text-primary">Game in progress</p>
-            <p className="mt-2 text-sm text-text-muted">This room is no longer accepting players.</p>
-            <a href="/dashboard" className="mt-6 block text-sm text-accent hover:text-accent-hover">
-              ← Back to dashboard
-            </a>
-          </div>
-        </main>
-      )
-    }
-
-    // Show join confirmation for invite links
-    const { data: hostPlayer } = await supabase
+  // Check if this player is already in the room
+  let mySlot = null
+  if (currentUserId) {
+    const { data } = await supabase
       .from('room_players')
-      .select('display_name')
+      .select('id')
       .eq('room_id', typedRoom.id)
-      .eq('is_host', true)
+      .eq('user_id', currentUserId)
       .maybeSingle()
-
-    const { count } = await supabase
+    mySlot = data
+  } else if (currentGuestId) {
+    const { data } = await supabase
       .from('room_players')
-      .select('*', { count: 'exact', head: true })
+      .select('id')
       .eq('room_id', typedRoom.id)
+      .eq('guest_id', currentGuestId)
+      .maybeSingle()
+    mySlot = data
+  }
 
-    const joinWithCode = async (formData: FormData): Promise<void> => {
-      'use server'
-      formData.set('code', upperCode)
-      await joinRoom(undefined, formData)
-    }
-
+  // Not in the room → show a join form (invite link flow)
+  if (!mySlot) {
+    const prefillName = guestSession?.displayName ?? userSession ? '' : ''
     return (
-      <main className="flex flex-1 items-center justify-center px-4">
-        <div className="w-full max-w-sm rounded-xl border border-border bg-surface p-8 text-center">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-accent">
-            You&apos;ve been invited
-          </p>
-          <h1 className="mb-2 text-2xl font-bold text-text-primary">
-            Room <span className="font-mono">{upperCode}</span>
-          </h1>
-          {hostPlayer && (
-            <p className="mb-1 text-sm text-text-muted">
-              Hosted by {hostPlayer.display_name}
-            </p>
-          )}
-          <p className="mb-6 text-sm text-text-muted">{count ?? 0} player(s) waiting</p>
-          <form action={joinWithCode}>
-            <Button type="submit" className="w-full py-3">
-              Join this game
-            </Button>
-          </form>
-          <a href="/dashboard" className="mt-4 block text-sm text-text-muted hover:text-text-primary">
-            Cancel
-          </a>
+      <main className="flex flex-1 items-center justify-center px-4 py-12">
+        <div className="w-full max-w-md animate-fade-up">
+          <div className="mb-6 text-center">
+            <h1 className="text-2xl font-bold text-text-primary">
+              Room <span className="font-mono text-accent">{upperCode}</span>
+            </h1>
+            <p className="mt-1 text-sm text-text-muted">Enter your name to join</p>
+          </div>
+          <div className="rounded-2xl border border-border bg-surface p-7 shadow-2xl">
+            <GuestJoinForm roomCode={upperCode} prefillName={prefillName} />
+          </div>
         </div>
       </main>
     )
   }
 
-  // Fetch all players
+  // Player is in the room — show the full lobby
   const { data: players } = await supabase
     .from('room_players')
     .select('*')
@@ -133,7 +109,8 @@ export default async function LobbyPage({ params }: { params: Promise<{ code: st
       <LobbyView
         room={typedRoom}
         players={(players ?? []) as RoomPlayerRow[]}
-        currentUserId={session.userId}
+        currentUserId={currentUserId}
+        currentGuestId={currentGuestId}
       />
     </>
   )
