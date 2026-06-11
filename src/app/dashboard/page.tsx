@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import { getSession } from '@/lib/session'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logout } from '@/app/actions/auth'
@@ -44,7 +45,12 @@ export default async function DashboardPage() {
           <span className="text-lg font-bold text-text-primary tracking-tight">Mafia</span>
           <div className="flex items-center gap-3">
             <RulesButton />
-            <span className="text-sm text-text-muted hidden sm:block">{user.full_name}</span>
+            <Link href="/profile" className="text-sm text-text-muted hover:text-text-primary transition-colors hidden sm:block">
+              {user.full_name}
+            </Link>
+            <Link href="/profile" className="text-xs text-text-muted hover:text-text-primary transition-colors sm:hidden">
+              Profile
+            </Link>
             <form action={logout}>
               <Button type="submit" variant="ghost" className="text-xs px-3 py-1.5">
                 Log out

@@ -227,6 +227,41 @@ create table public.game_events (
 alter table public.game_events enable row level security;
 ```
 
+### 3e. Phase 6 — Scoring and profile tables
+
+Run this as a **fifth** query in the SQL Editor:
+
+```sql
+-- Persisted game result (one per game, idempotency gate)
+create table public.game_results (
+  id           uuid default gen_random_uuid() primary key,
+  game_id      uuid unique not null references public.games(id) on delete cascade,
+  winning_team text not null,
+  ended_reason text not null default 'WIN_CONDITION',
+  created_at   timestamptz default now() not null
+);
+alter table public.game_results enable row level security;
+
+-- Per-player per-game stat record
+create table public.player_game_stats (
+  id                          uuid default gen_random_uuid() primary key,
+  game_id                     uuid not null references public.games(id) on delete cascade,
+  user_id                     uuid not null references public.users(id),
+  role                        text not null,
+  team                        text not null,
+  won                         boolean not null,
+  survived_to_end             boolean not null,
+  eliminated_round_number     integer,
+  correct_votes_against_mafia integer default 0 not null,
+  successful_doctor_saves     integer default 0 not null,
+  successful_detective_finds  integer default 0 not null,
+  score_delta                 integer not null,
+  created_at                  timestamptz default now() not null,
+  unique(game_id, user_id)
+);
+alter table public.player_game_stats enable row level security;
+```
+
 ### 4. Get your API keys
 
 In the Supabase dashboard, go to **Project Settings → API**.

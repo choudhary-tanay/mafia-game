@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getSession } from '@/lib/session'
 import { validateLobby } from '@/lib/lobby'
+import { computeAndPersistScores } from '@/lib/scoring'
 import {
   checkWinCondition,
   areNightActionsComplete,
@@ -592,6 +593,12 @@ async function endGame(
       ? 'Village wins! All Mafia have been eliminated.'
       : 'Mafia wins! They now control the village.'
   await addEvent(supabase, gameId, roundId, 'GAME_ENDED', 'PUBLIC', null, msg)
+
+  // Scoring — runs after the game event is committed so data is complete.
+  // computeAndPersistScores is idempotent; safe to call even if called twice.
+  if (winner) {
+    await computeAndPersistScores(supabase, gameId, winner)
+  }
 }
 
 async function addEvent(

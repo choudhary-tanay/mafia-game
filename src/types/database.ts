@@ -162,3 +162,29 @@ export type Announcement = {
 }
 
 export type WinCondition = 'VILLAGE' | 'MAFIA' | null
+
+// ─── Phase 6 ─────────────────────────────────────────────────────────────────
+
+export type GameResultRow = {
+  id: string
+  game_id: string
+  winning_team: string
+  ended_reason: string
+  created_at: string
+}
+
+export type PlayerGameStatRow = {
+  id: string
+  game_id: string
+  user_id: string
+  role: Role
+  team: string
+  won: boolean
+  survived_to_end: boolean
+  eliminated_round_number: number | null
+  correct_votes_against_mafia: number
+  successful_doctor_saves: number
+  successful_detective_finds: number
+  score_delta: number
+  created_at: string
+}
