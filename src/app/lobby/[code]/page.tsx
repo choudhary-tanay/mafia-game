@@ -2,6 +2,7 @@ import { notFound, redirect } from 'next/navigation'
 import { getSession } from '@/lib/session'
 import { getGuestSession } from '@/lib/guest-session'
 import { createServiceClient } from '@/lib/supabase/server'
+import { hasGuestPlayerColumns, playerIdentityFilter } from '@/lib/guest-schema'
 import LobbyView from '@/components/lobby/LobbyView'
 import LobbyRefresh from '@/components/lobby/LobbyRefresh'
 import GuestJoinForm from '@/components/join/GuestJoinForm'
@@ -57,6 +58,7 @@ export default async function LobbyPage({ params }: { params: Promise<{ code: st
   }
 
   // Check if this player is already in the room
+  const hasGuestColumns = await hasGuestPlayerColumns(supabase)
   let mySlot = null
   if (currentUserId) {
     const { data } = await supabase
@@ -71,14 +73,19 @@ export default async function LobbyPage({ params }: { params: Promise<{ code: st
       .from('room_players')
       .select('id')
       .eq('room_id', typedRoom.id)
-      .eq('guest_id', currentGuestId)
+      .match(playerIdentityFilter({
+        userId: null,
+        guestId: currentGuestId,
+        isGuest: true,
+        displayName: guestSession?.displayName ?? null,
+      }, hasGuestColumns))
       .maybeSingle()
     mySlot = data
   }
 
   // Not in the room → show a join form (invite link flow)
   if (!mySlot) {
-    const prefillName = guestSession?.displayName ?? userSession ? '' : ''
+    const prefillName = guestSession?.displayName ?? ''
     return (
       <main className="flex flex-1 items-center justify-center px-4 py-12">
         <div className="w-full max-w-md animate-fade-up">

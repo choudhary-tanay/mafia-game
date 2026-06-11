@@ -1,15 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { beginNight } from '@/app/actions/game'
-import type { Role, GamePhase } from '@/types/database'
+import type { Role } from '@/types/database'
 import Button from '@/components/ui/Button'
 
 type Props = {
   role: Role
   mafiaTeammates: string[]
   players: { userId: string; name: string; isMe: boolean }[]
-  phase: GamePhase
   gameId: string
   isHost: boolean
 }
@@ -56,9 +56,16 @@ const ROLE_CONFIG: Record<
   },
 }
 
-export default function RoleRevealCard({ role, mafiaTeammates, players, phase, gameId, isHost }: Props) {
+export default function RoleRevealCard({ role, mafiaTeammates, players, gameId, isHost }: Props) {
   const [acknowledged, setAcknowledged] = useState(false)
+  const router = useRouter()
   const cfg = ROLE_CONFIG[role]
+
+  useEffect(() => {
+    if (!acknowledged) return
+    const id = window.setInterval(() => router.refresh(), 3000)
+    return () => window.clearInterval(id)
+  }, [acknowledged, router])
 
   if (!acknowledged) {
     return (

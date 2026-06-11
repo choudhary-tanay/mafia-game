@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useEffect, useRef } from 'react'
+import { useActionState, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { RoomRow, RoomPlayerRow } from '@/types/database'
 import { validateLobby, recommendedMafiaCount, formatTimer } from '@/lib/lobby'
@@ -45,7 +45,9 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
     (!!currentGuestId && roomTyped.host_guest_id === currentGuestId)
   const isMe = (p: RoomPlayerRow) =>
     (currentUserId  && p.user_id  === currentUserId) ||
-    (currentGuestId && (p as RoomPlayerRow & { guest_id?: string }).guest_id === currentGuestId)
+    (currentGuestId &&
+      ((p as RoomPlayerRow & { guest_id?: string | null }).guest_id === currentGuestId ||
+        p.user_id === currentGuestId))
   const validation = validateLobby(players.length, room.mafia_count)
   const recommended = recommendedMafiaCount(players.length)
   const inviteUrl =
@@ -62,19 +64,19 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
     updateSettings,
     undefined,
   )
-  const copied = useRef(false)
+  const [copied, setCopied] = useState(false)
 
-  // Clear success flash after save
+  // Pull fresh room settings after a successful save.
   useEffect(() => {
-    if (settingsState === undefined && settingsPending === false) {
+    if (settingsState?.success && !settingsPending) {
       router.refresh()
     }
   }, [settingsState, settingsPending, router])
 
   async function copyInvite() {
     await navigator.clipboard.writeText(inviteUrl)
-    copied.current = true
-    router.refresh()
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1500)
   }
 
   return (
@@ -93,7 +95,7 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
               onClick={copyInvite}
               className="rounded-lg border border-border px-3 py-1.5 text-xs text-text-muted hover:text-text-primary hover:border-text-muted transition-colors"
             >
-              Copy invite link
+              {copied ? 'Copied' : 'Copy invite link'}
             </button>
             <form action={leaveAction}>
               <Button type="submit" variant="ghost" className="text-xs px-3 py-1.5">
@@ -252,8 +254,8 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
                   Save settings
                 </Button>
 
-                {settingsState === undefined && !settingsPending && (
-                  <p className="text-center text-xs text-green-400">Settings saved ✓</p>
+                {settingsState?.success && !settingsPending && (
+                  <p className="text-center text-xs text-green-400">Settings saved</p>
                 )}
               </form>
             ) : (

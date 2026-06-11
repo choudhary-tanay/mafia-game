@@ -83,28 +83,53 @@ export async function areNightActionsComplete(
   supabase: SupabaseClient,
   gameId: string,
   roundId: string,
+  hasGuestColumns = true,
 ): Promise<boolean> {
   const { data: alive } = await supabase
     .from('game_players')
-    .select('user_id, role')
+    .select(hasGuestColumns ? 'user_id, guest_id, role' : 'user_id, role')
     .eq('game_id', gameId)
     .eq('is_alive', true)
 
   if (!alive) return false
+  const aliveRows = alive as unknown as {
+    user_id: string | null
+    guest_id?: string | null
+    role: Role
+  }[]
 
-  const aliveMafia      = alive.filter((p) => p.role === 'MAFIA').map((p) => p.user_id)
-  const aliveDoctors    = alive.filter((p) => p.role === 'DOCTOR').map((p) => p.user_id)
-  const aliveDetectives = alive.filter((p) => p.role === 'DETECTIVE').map((p) => p.user_id)
+  const stableId = (p: { user_id: string | null; guest_id?: string | null }) =>
+    p.user_id ?? p.guest_id ?? null
+
+  const aliveMafia = aliveRows
+    .filter((p) => p.role === 'MAFIA')
+    .map(stableId)
+    .filter((id): id is string => Boolean(id))
+  const aliveDoctors = aliveRows
+    .filter((p) => p.role === 'DOCTOR')
+    .map(stableId)
+    .filter((id): id is string => Boolean(id))
+  const aliveDetectives = aliveRows
+    .filter((p) => p.role === 'DETECTIVE')
+    .map(stableId)
+    .filter((id): id is string => Boolean(id))
 
   const { data: actions } = await supabase
     .from('night_actions')
-    .select('actor_user_id, action_type')
+    .select(hasGuestColumns ? 'actor_user_id, actor_guest_id, action_type' : 'actor_user_id, action_type')
     .eq('round_id', roundId)
 
   const submitted = new Map<string, Set<string>>()
-  for (const a of actions ?? []) {
-    if (!submitted.has(a.actor_user_id)) submitted.set(a.actor_user_id, new Set())
-    submitted.get(a.actor_user_id)!.add(a.action_type)
+  const actionRows = (actions ?? []) as unknown as {
+    actor_user_id: string | null
+    actor_guest_id?: string | null
+    action_type: string
+  }[]
+  for (const a of actionRows) {
+    const actorId = a.actor_user_id ?? (a as { actor_guest_id?: string | null }).actor_guest_id
+    if (!actorId) continue
+    if (!submitted.has(actorId)) submitted.set(actorId, new Set())
+    submitted.get(actorId)!.add(a.action_type)
   }
 
   // At least one Mafia member must have submitted MAFIA_KILL

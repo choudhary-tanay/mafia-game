@@ -2,8 +2,15 @@
 
 import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/server'
-import { getSession } from '@/lib/session'
-import { getPlayerIdentity, playerFilter, type PlayerIdentity } from '@/lib/identity'
+import { getPlayerIdentity } from '@/lib/identity'
+import {
+  gamePlayerInsertPayload,
+  hasGuestPlayerColumns,
+  nightActionsResolutionSelect,
+  playerIdentityFilter,
+  roomPlayersSelect,
+  stablePlayerOrFilter,
+} from '@/lib/guest-schema'
 import { validateLobby } from '@/lib/lobby'
 import { computeAndPersistScores } from '@/lib/scoring'
 import { broadcastGameUpdate } from '@/lib/realtime'
@@ -23,6 +30,61 @@ import {
   abstainStory,
 } from '@/lib/stories'
 import type { Role, WinCondition } from '@/types/database'
+
+type StablePlayerRow = {
+  user_id: string | null
+  guest_id?: string | null
+  display_name?: string | null
+  is_alive?: boolean
+  role?: Role
+}
+
+async function getGamePlayerByStableId(
+  supabase: ReturnType<typeof createServiceClient>,
+  gameId: string,
+  playerId: string,
+  hasGuestColumns: boolean,
+  select = hasGuestColumns
+    ? 'user_id, guest_id, display_name, is_alive, role'
+    : 'user_id, is_alive, role',
+) {
+  const { data } = await supabase
+    .from('game_players')
+    .select(select)
+    .eq('game_id', gameId)
+    .or(stablePlayerOrFilter(playerId, hasGuestColumns))
+    .maybeSingle()
+
+  return data as StablePlayerRow | null
+}
+
+async function getDisplayNameForStableId(
+  supabase: ReturnType<typeof createServiceClient>,
+  gameId: string,
+  playerId: string | null,
+  hasGuestColumns: boolean,
+): Promise<string> {
+  if (!playerId) return 'Someone'
+  const player = await getGamePlayerByStableId(
+    supabase,
+    gameId,
+    playerId,
+    hasGuestColumns,
+    hasGuestColumns ? 'display_name, user_id, guest_id' : 'room_id, user_id',
+  ) as (StablePlayerRow & { room_id?: string | null }) | null
+
+  if (player?.display_name) return player.display_name
+  if (!player?.room_id) return 'Someone'
+
+  const { data: roomPlayer } = await supabase
+    .from('room_players')
+    .select('display_name')
+    .eq('room_id', player.room_id)
+    .eq('user_id', playerId)
+    .maybeSingle()
+
+  return (roomPlayer as { display_name?: string } | null)?.display_name ?? 'Someone'
+}
 
 // ─── Phase 3: start game ──────────────────────────────────────────────────────
 // buildRoleList is imported from lib/game-engine.ts (exported for testing)
@@ -45,9 +107,10 @@ export async function startGame(roomCode: string): Promise<void> {
     (identity.guestId && room.host_guest_id === identity.guestId)
   if (!isHost) redirect(`/lobby/${roomCode}`)
 
+  const hasGuestColumns = await hasGuestPlayerColumns(supabase)
   const { data: players } = await supabase
     .from('room_players')
-    .select('user_id, guest_id, is_guest, display_name')
+    .select(roomPlayersSelect(hasGuestColumns))
     .eq('room_id', room.id)
 
   if (!players || players.length < 4) redirect(`/lobby/${roomCode}`)
@@ -64,20 +127,33 @@ export async function startGame(roomCode: string): Promise<void> {
 
   if (gameError || !game) redirect(`/lobby/${roomCode}`)
 
-  await supabase.from('game_players').insert(
+  const { error: playersError } = await supabase.from('game_players').insert(
     players.map((p, i) => ({
-      game_id: game.id,
-      room_id: room.id,
-      user_id:      (p as { user_id: string | null }).user_id   ?? null,
-      guest_id:     (p as { guest_id: string | null }).guest_id  ?? null,
-      is_guest:     !!(p as { is_guest: boolean }).is_guest,
-      display_name: (p as { display_name: string }).display_name ?? null,
-      role: roles[i],
-      is_alive: true,
-      survived_to_end: false,
+      ...gamePlayerInsertPayload({
+        hasGuestColumns,
+        gameId: game.id,
+        roomId: room.id,
+        player: p as unknown as {
+          user_id: string | null
+          guest_id?: string | null
+          is_guest?: boolean | null
+          display_name?: string | null
+        },
+        role: roles[i],
+      }),
     })),
   )
-  await supabase.from('rooms').update({ status: 'ACTIVE' }).eq('id', room.id)
+
+  if (playersError) {
+    await supabase.from('games').delete().eq('id', game.id)
+    redirect(`/lobby/${roomCode}`)
+  }
+
+  const { error: roomError } = await supabase.from('rooms').update({ status: 'ACTIVE' }).eq('id', room.id)
+  if (roomError) {
+    await supabase.from('games').delete().eq('id', game.id)
+    redirect(`/lobby/${roomCode}`)
+  }
 
   redirect(`/game/${game.id}`)
 }
@@ -98,12 +174,14 @@ export async function beginNight(gameId: string): Promise<void> {
 
   if (!game) redirect('/')
 
+  const hasGuestColumns = await hasGuestPlayerColumns(supabase)
+
   // Security: only a participant can advance
   const { data: me } = await supabase
     .from('game_players')
     .select('role')
     .eq('game_id', gameId)
-    .match(playerFilter(identity))
+    .match(playerIdentityFilter(identity, hasGuestColumns))
     .maybeSingle()
   if (!me) redirect('/')
 
@@ -154,6 +232,7 @@ export async function submitNightAction(
   const identity = await getPlayerIdentity()
   if (!identity) return { error: 'Not authenticated.' }
   const supabase = createServiceClient()
+  const hasGuestColumns = await hasGuestPlayerColumns(supabase)
 
   const { data: game } = await supabase
     .from('games')
@@ -170,7 +249,7 @@ export async function submitNightAction(
     .from('game_players')
     .select('role, is_alive')
     .eq('game_id', gameId)
-    .match(playerFilter(identity))
+    .match(playerIdentityFilter(identity, hasGuestColumns))
     .maybeSingle()
 
   if (!me?.is_alive) return { error: 'Dead players cannot act.' }
@@ -180,12 +259,13 @@ export async function submitNightAction(
   }
   if (!allowed[actionType]?.includes(me.role)) return { error: 'Invalid action for your role.' }
 
-  const { data: target } = await supabase
-    .from('game_players')
-    .select('is_alive')
-    .eq('game_id', gameId)
-    .eq('user_id', targetUserId)
-    .maybeSingle()
+  const target = await getGamePlayerByStableId(
+    supabase,
+    gameId,
+    targetUserId,
+    hasGuestColumns,
+    hasGuestColumns ? 'is_alive, user_id, guest_id' : 'is_alive, user_id',
+  )
 
   if (!target?.is_alive) return { error: 'Target is not alive.' }
 
@@ -198,25 +278,37 @@ export async function submitNightAction(
 
   if (!round) return { error: 'Round not found.' }
 
-  const conflictCol = identity.userId
+  const actorStableId = identity.userId ?? identity.guestId!
+  const conflictCol = identity.userId || !hasGuestColumns
     ? 'round_id,actor_user_id,action_type'
     : 'round_id,actor_guest_id,action_type'
 
-  await supabase.from('night_actions').upsert(
-    {
-      game_id: gameId,
-      round_id: round.id,
-      actor_user_id:  identity.userId  ?? null,
-      actor_guest_id: identity.guestId ?? null,
-      action_type: actionType,
-      target_user_id: targetUserId,
-      submitted_at: new Date().toISOString(),
-    },
+  const { error: actionError } = await supabase.from('night_actions').upsert(
+    hasGuestColumns
+      ? {
+          game_id: gameId,
+          round_id: round.id,
+          actor_user_id:  identity.userId  ?? null,
+          actor_guest_id: identity.guestId ?? null,
+          action_type: actionType,
+          target_user_id: targetUserId,
+          submitted_at: new Date().toISOString(),
+        }
+      : {
+          game_id: gameId,
+          round_id: round.id,
+          actor_user_id: actorStableId,
+          action_type: actionType,
+          target_user_id: targetUserId,
+          submitted_at: new Date().toISOString(),
+        },
     { onConflict: conflictCol },
   )
 
-  const complete = await areNightActionsComplete(supabase, gameId, round.id)
-  if (complete) await resolveNight(supabase, gameId, round.id)
+  if (actionError) return { error: 'Could not submit night action.' }
+
+  const complete = await areNightActionsComplete(supabase, gameId, round.id, hasGuestColumns)
+  if (complete) await resolveNight(supabase, gameId, round.id, hasGuestColumns)
 
   return {}
 }
@@ -229,6 +321,7 @@ export async function submitVote(
   const identity = await getPlayerIdentity()
   if (!identity) return { error: 'Not authenticated.' }
   const supabase = createServiceClient()
+  const hasGuestColumns = await hasGuestPlayerColumns(supabase)
 
   const { data: game } = await supabase
     .from('games')
@@ -245,18 +338,19 @@ export async function submitVote(
     .from('game_players')
     .select('is_alive')
     .eq('game_id', gameId)
-    .match(playerFilter(identity))
+    .match(playerIdentityFilter(identity, hasGuestColumns))
     .maybeSingle()
 
   if (!me?.is_alive) return { error: 'Dead players cannot vote.' }
 
   if (targetUserId) {
-    const { data: target } = await supabase
-      .from('game_players')
-      .select('is_alive')
-      .eq('game_id', gameId)
-      .eq('user_id', targetUserId)
-      .maybeSingle()
+    const target = await getGamePlayerByStableId(
+      supabase,
+      gameId,
+      targetUserId,
+      hasGuestColumns,
+      hasGuestColumns ? 'is_alive, user_id, guest_id' : 'is_alive, user_id',
+    )
     if (!target?.is_alive) return { error: 'Target is not alive.' }
   }
 
@@ -269,22 +363,33 @@ export async function submitVote(
 
   if (!round) return { error: 'Round not found.' }
 
-  const conflictCol = identity.userId ? 'round_id,voter_user_id' : 'round_id,voter_guest_id'
+  const voterStableId = identity.userId ?? identity.guestId!
+  const conflictCol = identity.userId || !hasGuestColumns ? 'round_id,voter_user_id' : 'round_id,voter_guest_id'
 
-  await supabase.from('votes').upsert(
-    {
-      game_id: gameId,
-      round_id: round.id,
-      voter_user_id:  identity.userId  ?? null,
-      voter_guest_id: identity.guestId ?? null,
-      target_user_id: targetUserId,
-      submitted_at: new Date().toISOString(),
-    },
+  const { error: voteError } = await supabase.from('votes').upsert(
+    hasGuestColumns
+      ? {
+          game_id: gameId,
+          round_id: round.id,
+          voter_user_id:  identity.userId  ?? null,
+          voter_guest_id: identity.guestId ?? null,
+          target_user_id: targetUserId,
+          submitted_at: new Date().toISOString(),
+        }
+      : {
+          game_id: gameId,
+          round_id: round.id,
+          voter_user_id: voterStableId,
+          target_user_id: targetUserId,
+          submitted_at: new Date().toISOString(),
+        },
     { onConflict: conflictCol },
   )
 
+  if (voteError) return { error: 'Could not submit vote.' }
+
   const allIn = await areAllVotesIn(supabase, gameId, round.id)
-  if (allIn) await resolveVote(supabase, gameId, round.id)
+  if (allIn) await resolveVote(supabase, gameId, round.id, hasGuestColumns)
 
   return {}
 }
@@ -302,6 +407,7 @@ export async function maybeAdvancePhase(gameId: string): Promise<boolean> {
 
   if (!game) return false
   if (!isDeadlinePassed(game.phase_deadline)) return false
+  const hasGuestColumns = await hasGuestPlayerColumns(supabase)
 
   const { data: round } = await supabase
     .from('rounds')
@@ -313,7 +419,7 @@ export async function maybeAdvancePhase(gameId: string): Promise<boolean> {
   const phase = game.current_phase
 
   if (phase === 'NIGHT_ACTIONS_OPEN') {
-    if (round) await resolveNight(supabase, gameId, round.id)
+    if (round) await resolveNight(supabase, gameId, round.id, hasGuestColumns)
     return true
   }
   if (phase === 'DISCUSSION') {
@@ -335,7 +441,7 @@ export async function maybeAdvancePhase(gameId: string): Promise<boolean> {
     return true
   }
   if (phase === 'VOTING') {
-    if (round) await resolveVote(supabase, gameId, round.id)
+    if (round) await resolveVote(supabase, gameId, round.id, hasGuestColumns)
     return true
   }
 
@@ -385,6 +491,7 @@ async function resolveNight(
   supabase: ReturnType<typeof createServiceClient>,
   gameId: string,
   roundId: string,
+  hasGuestColumns: boolean,
 ) {
   // Atomic guard: only resolve once
   const { error } = await supabase
@@ -398,44 +505,40 @@ async function resolveNight(
   // Fetch all night actions for this round
   const { data: actions } = await supabase
     .from('night_actions')
-    .select('action_type, actor_user_id, target_user_id, submitted_at')
+    .select(nightActionsResolutionSelect(hasGuestColumns))
     .eq('round_id', roundId)
     .order('submitted_at', { ascending: false })
+  const nightActions = (actions ?? []) as unknown as {
+    action_type: string
+    actor_user_id: string | null
+    actor_guest_id?: string | null
+    target_user_id: string | null
+    submitted_at: string
+  }[]
 
   // Pick kill target: last submitted MAFIA_KILL
-  const killAction = actions?.find((a) => a.action_type === 'MAFIA_KILL')
+  const killAction = nightActions.find((a) => a.action_type === 'MAFIA_KILL')
   const killTargetId = killAction?.target_user_id ?? null
 
   // Pick save target: any DOCTOR_SAVE
-  const saveAction = actions?.find((a) => a.action_type === 'DOCTOR_SAVE')
+  const saveAction = nightActions.find((a) => a.action_type === 'DOCTOR_SAVE')
   const saveTargetId = saveAction?.target_user_id ?? null
 
   // Detective check
-  const detectiveAction = actions?.find((a) => a.action_type === 'DETECTIVE_CHECK')
-
-  let killed: string | null = null
-  let saved = false
+  const detectiveAction = nightActions.find((a) => a.action_type === 'DETECTIVE_CHECK')
 
   if (killTargetId) {
     if (killTargetId === saveTargetId) {
-      saved = true
       await addEvent(supabase, gameId, roundId, 'PLAYER_SAVED_BY_DOCTOR', 'PUBLIC', null,
         doctorSaveStory())
     } else {
-      killed = killTargetId
-      // Get display name for story
-      const { data: victim } = await supabase
-        .from('room_players')
-        .select('display_name, rooms!inner(id)')
-        .eq('user_id', killTargetId)
-        .maybeSingle()
-      const name = (victim as { display_name: string } | null)?.display_name ?? 'Someone'
+      const name = await getDisplayNameForStableId(supabase, gameId, killTargetId, hasGuestColumns)
 
       await supabase
         .from('game_players')
         .update({ is_alive: false, death_round_number: (await getRoundNumber(supabase, roundId)), death_cause: 'MAFIA_KILL' })
         .eq('game_id', gameId)
-        .eq('user_id', killTargetId)
+        .or(stablePlayerOrFilter(killTargetId, hasGuestColumns))
 
       await addEvent(supabase, gameId, roundId, 'PLAYER_KILLED_BY_MAFIA', 'PUBLIC', killTargetId,
         mafiaKillStory(name))
@@ -447,26 +550,25 @@ async function resolveNight(
 
   // Detective result (private)
   if (detectiveAction?.target_user_id) {
-    const { data: suspect } = await supabase
-      .from('game_players')
-      .select('role')
-      .eq('game_id', gameId)
-      .eq('user_id', detectiveAction.target_user_id)
-      .maybeSingle()
+    const suspect = await getGamePlayerByStableId(
+      supabase,
+      gameId,
+      detectiveAction.target_user_id,
+      hasGuestColumns,
+      hasGuestColumns ? 'role, user_id, guest_id' : 'role, user_id',
+    )
 
     const isMafia = suspect?.role === 'MAFIA'
-    const { data: suspectName } = await supabase
-      .from('room_players')
-      .select('display_name')
-      .eq('user_id', detectiveAction.target_user_id)
-      .maybeSingle()
 
-    const name = (suspectName as { display_name: string } | null)?.display_name ?? 'Your target'
+    const name = await getDisplayNameForStableId(supabase, gameId, detectiveAction.target_user_id, hasGuestColumns)
+    const detectiveRecipientId =
+      detectiveAction.actor_user_id ?? (detectiveAction as { actor_guest_id?: string | null }).actor_guest_id ?? null
+
     await addEvent(
       supabase, gameId, roundId, 'DETECTIVE_INVESTIGATION',
       'PRIVATE_TO_PLAYER', detectiveAction.target_user_id,
       isMafia ? `${name} is MAFIA.` : `${name} is NOT Mafia.`,
-      detectiveAction.actor_user_id,
+      detectiveRecipientId ?? undefined,
     )
   }
 
@@ -499,6 +601,7 @@ async function resolveVote(
   supabase: ReturnType<typeof createServiceClient>,
   gameId: string,
   roundId: string,
+  hasGuestColumns: boolean,
 ) {
   const { error } = await supabase
     .from('games')
@@ -515,9 +618,8 @@ async function resolveVote(
 
   // Count votes
   const counts = new Map<string, number>()
-  let abstains = 0
   for (const v of allVotes ?? []) {
-    if (!v.target_user_id) { abstains++; continue }
+    if (!v.target_user_id) continue
     counts.set(v.target_user_id, (counts.get(v.target_user_id) ?? 0) + 1)
   }
 
@@ -533,19 +635,14 @@ async function resolveVote(
       await addEvent(supabase, gameId, roundId, 'NO_ELIMINATION_TIE', 'PUBLIC', null, tieStory())
     } else {
       eliminated = topCandidates[0][0]
-      const { data: victim } = await supabase
-        .from('room_players')
-        .select('display_name')
-        .eq('user_id', eliminated)
-        .maybeSingle()
-      const name = (victim as { display_name: string } | null)?.display_name ?? 'Someone'
+      const name = await getDisplayNameForStableId(supabase, gameId, eliminated, hasGuestColumns)
 
       const roundNum = await getRoundNumber(supabase, roundId)
       await supabase
         .from('game_players')
         .update({ is_alive: false, death_round_number: roundNum, death_cause: 'VOTE' })
         .eq('game_id', gameId)
-        .eq('user_id', eliminated)
+        .or(stablePlayerOrFilter(eliminated, hasGuestColumns))
 
       await addEvent(supabase, gameId, roundId, 'PLAYER_ELIMINATED_BY_VOTE', 'PUBLIC', eliminated,
         voteEliminationStory(name))
@@ -569,8 +666,8 @@ async function resolveVote(
 
 // Called from game page after VOTE_RESOLUTION deadline — advances to next night
 export async function beginNextNight(gameId: string): Promise<void> {
-  const session = await getSession()
-  if (!session?.userId) redirect('/login')
+  const identity = await getPlayerIdentity()
+  if (!identity) redirect('/')
   const supabase = createServiceClient()
 
   const { data: game } = await supabase
@@ -583,9 +680,14 @@ export async function beginNextNight(gameId: string): Promise<void> {
 
   const { data: room } = await supabase
     .from('rooms')
-    .select('night_timer_seconds')
+    .select('host_user_id, host_guest_id, night_timer_seconds')
     .eq('id', game.room_id)
     .single()
+
+  const isHost =
+    (identity.userId  && room?.host_user_id  === identity.userId) ||
+    (identity.guestId && room?.host_guest_id === identity.guestId)
+  if (!isHost) return
 
   const nextRound = game.current_round_number + 1
   const { data: round } = await supabase

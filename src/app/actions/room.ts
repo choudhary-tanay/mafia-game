@@ -5,12 +5,20 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getSession } from '@/lib/session'
 import { getPlayerIdentity } from '@/lib/identity'
 import { createGuestSession } from '@/lib/guest-session'
+import {
+  ensureLegacyGuestUser,
+  hasGuestPlayerColumns,
+  legacyGuestIdsForUsers,
+  playerIdentityFilter,
+  roomPlayerInsertPayload,
+} from '@/lib/guest-schema'
 import { joinRoomSchema, updateSettingsSchema } from '@/lib/validations'
 import { type GuestActionState } from '@/app/actions/guest'
 
 export type RoomActionState = {
   errors?: Record<string, string[]>
   generalError?: string
+  success?: boolean
 } | undefined
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -95,16 +103,22 @@ export async function createRoom(): Promise<void> {
 
   if (error || !room) redirect('/dashboard')
 
-  await supabase.from('room_players').insert({
-    room_id: room.id,
-    user_id: session.userId,
-    guest_id: null,
-    is_guest: false,
-    display_name: user.full_name as string,
-    avatar_url: user.avatar_url ?? null,
-    is_host: true,
-    is_connected: true,
-  })
+  const hasGuestColumns = await hasGuestPlayerColumns(supabase)
+  const { error: playerError } = await supabase.from('room_players').insert(
+    roomPlayerInsertPayload({
+      hasGuestColumns,
+      roomId: room.id,
+      userId: session.userId,
+      displayName: user.full_name as string,
+      avatarUrl: user.avatar_url ?? null,
+      isHost: true,
+    }),
+  )
+
+  if (playerError) {
+    await supabase.from('rooms').delete().eq('id', room.id)
+    redirect('/dashboard')
+  }
 
   redirect(`/lobby/${room.code}`)
 }
@@ -144,19 +158,32 @@ export async function createRoomAsGuest(
 
   if (error || !room) return { generalError: 'Could not create room. Please try again.' }
 
-  await supabase.from('room_players').insert({
-    room_id: room.id,
-    user_id: null,
-    guest_id: guestId,
-    is_guest: true,
-    display_name: displayName,
-    avatar_url: null,
-    is_host: true,
-    is_connected: true,
-  })
+  const hasGuestColumns = await hasGuestPlayerColumns(supabase)
+  if (!hasGuestColumns) {
+    const compatibilityError = await ensureLegacyGuestUser(supabase, guestId, displayName)
+    if (compatibilityError) {
+      await supabase.from('rooms').delete().eq('id', room.id)
+      return { generalError: 'Could not create guest session. Please try again.' }
+    }
+  }
+
+  const { error: playerError } = await supabase.from('room_players').insert(
+    roomPlayerInsertPayload({
+      hasGuestColumns,
+      roomId: room.id,
+      guestId,
+      displayName,
+      isHost: true,
+    }),
+  )
+
+  if (playerError) {
+    await supabase.from('rooms').delete().eq('id', room.id)
+    return { generalError: 'Could not add you to the room. Please try again.' }
+  }
 
   await createGuestSession(guestId, displayName, room.id)
-  redirect(`/lobby/${room.code}`)
+  return { redirectTo: `/lobby/${room.code}` }
 }
 
 export async function joinRoom(
@@ -200,15 +227,16 @@ export async function joinRoom(
 
   if (!user) redirect('/login')
 
+  const hasGuestColumns = await hasGuestPlayerColumns(supabase)
   const { error } = await supabase.from('room_players').insert({
-    room_id: room.id,
-    user_id: session.userId,
-    guest_id: null,
-    is_guest: false,
-    display_name: user.full_name as string,
-    avatar_url: user.avatar_url ?? null,
-    is_host: false,
-    is_connected: true,
+    ...roomPlayerInsertPayload({
+      hasGuestColumns,
+      roomId: room.id,
+      userId: session.userId,
+      displayName: user.full_name as string,
+      avatarUrl: user.avatar_url ?? null,
+      isHost: false,
+    }),
   })
 
   if (error) return { generalError: 'Could not join room. Please try again.' }
@@ -232,17 +260,14 @@ export async function leaveRoom(roomCode: string): Promise<void> {
   }
 
   // Remove this player from room_players
-  if (identity.userId) {
-    await supabase.from('room_players').delete()
-      .eq('room_id', room.id).eq('user_id', identity.userId)
-  } else if (identity.guestId) {
-    await supabase.from('room_players').delete()
-      .eq('room_id', room.id).eq('guest_id', identity.guestId)
-  }
+  const hasGuestColumns = await hasGuestPlayerColumns(supabase)
+  await supabase.from('room_players').delete()
+    .eq('room_id', room.id)
+    .match(playerIdentityFilter(identity, hasGuestColumns))
 
   const { data: remaining } = await supabase
     .from('room_players')
-    .select('user_id, guest_id')
+    .select(hasGuestColumns ? 'user_id, guest_id, is_guest' : 'user_id')
     .eq('room_id', room.id)
     .order('joined_at', { ascending: true })
 
@@ -250,18 +275,30 @@ export async function leaveRoom(roomCode: string): Promise<void> {
     await supabase.from('rooms').delete().eq('id', room.id)
   } else if (identityIsHost(room as { host_user_id: string | null; host_guest_id: string | null }, identity)) {
     // Promote first remaining player to host
-    const next = remaining[0] as { user_id: string | null; guest_id: string | null }
+    const next = remaining[0] as unknown as { user_id: string | null; guest_id?: string | null; is_guest?: boolean | null }
+    let nextUserId = next.user_id ?? null
+    let nextGuestId = hasGuestColumns ? (next.guest_id ?? null) : null
+
+    if (!hasGuestColumns && nextUserId) {
+      const legacyGuestIds = await legacyGuestIdsForUsers(supabase, [nextUserId])
+      if (legacyGuestIds.has(nextUserId)) {
+        nextGuestId = nextUserId
+        nextUserId = null
+      }
+    }
+
     await supabase.from('rooms').update({
-      host_user_id:  next.user_id  ?? null,
-      host_guest_id: next.guest_id ?? null,
+      host_user_id:  nextUserId,
+      host_guest_id: nextGuestId,
     }).eq('id', room.id)
 
-    if (next.user_id) {
+    if (nextUserId) {
       await supabase.from('room_players').update({ is_host: true })
-        .eq('room_id', room.id).eq('user_id', next.user_id)
-    } else if (next.guest_id) {
-      await supabase.from('room_players').update({ is_host: true })
-        .eq('room_id', room.id).eq('guest_id', next.guest_id)
+        .eq('room_id', room.id).eq('user_id', nextUserId)
+    } else if (nextGuestId) {
+      const hostQuery = supabase.from('room_players').update({ is_host: true }).eq('room_id', room.id)
+      if (hasGuestColumns) await hostQuery.eq('guest_id', nextGuestId)
+      else await hostQuery.eq('user_id', nextGuestId)
     }
   }
 
@@ -315,5 +352,5 @@ export async function updateSettings(
     .eq('id', room.id)
 
   if (error) return { generalError: 'Could not save settings.' }
-  return undefined
+  return { success: true }
 }

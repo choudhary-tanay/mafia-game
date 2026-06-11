@@ -2,6 +2,7 @@
 
 import { useEffect, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { beginNight, beginNextNight, endDiscussionEarly } from '@/app/actions/game'
 import { getBrowserClient } from '@/lib/supabase/client'
 import AnnouncementFeed from './AnnouncementFeed'
@@ -261,21 +262,21 @@ export default function GameView(props: GameViewProps) {
                         You played as a guest. Your score for this game is temporary.
                       </p>
                       <div className="flex flex-col sm:flex-row gap-2 justify-center mt-2">
-                        <a href="/signup" className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover transition-colors">
+                        <Link href="/signup" className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover transition-colors">
                           Create account to save score
-                        </a>
-                        <a href="/" className="rounded-lg border border-border px-5 py-2.5 text-sm text-text-muted hover:text-text-primary transition-colors">
+                        </Link>
+                        <Link href="/" className="rounded-lg border border-border px-5 py-2.5 text-sm text-text-muted hover:text-text-primary transition-colors">
                           Continue as guest
-                        </a>
+                        </Link>
                       </div>
                     </div>
                   ) : (
-                    <a
+                    <Link
                       href="/dashboard"
                       className="inline-block mt-2 rounded-lg bg-accent px-6 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover transition-colors"
                     >
                       Back to dashboard
-                    </a>
+                    </Link>
                   )}
                 </div>
               )}

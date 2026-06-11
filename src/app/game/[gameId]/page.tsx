@@ -2,6 +2,7 @@ import { notFound, redirect } from 'next/navigation'
 import { getSession } from '@/lib/session'
 import { getGuestSession } from '@/lib/guest-session'
 import { createServiceClient } from '@/lib/supabase/server'
+import { gamePlayersSelect, hasGuestPlayerColumns } from '@/lib/guest-schema'
 import { maybeAdvancePhase } from '@/app/actions/game'
 import RoleRevealCard from '@/components/game/RoleRevealCard'
 import GameView, { type GameViewProps } from '@/components/game/GameView'
@@ -22,6 +23,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
   await maybeAdvancePhase(gameId)
 
   const supabase = createServiceClient()
+  const hasGuestColumns = await hasGuestPlayerColumns(supabase)
 
   // ── Game record ──────────────────────────────────────────────────────────
   const { data: gameRaw } = await supabase
@@ -37,16 +39,17 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
   // Support both authenticated (user_id) and guest (guest_id) players
   let myPlayerQuery = supabase
     .from('game_players')
-    .select('role, is_alive, user_id, guest_id')
+    .select(hasGuestColumns ? 'role, is_alive, user_id, guest_id' : 'role, is_alive, user_id')
     .eq('game_id', gameId)
   if (currentUserId) myPlayerQuery = myPlayerQuery.eq('user_id', currentUserId) as typeof myPlayerQuery
-  else               myPlayerQuery = myPlayerQuery.eq('guest_id', currentGuestId!) as typeof myPlayerQuery
+  else               myPlayerQuery = myPlayerQuery.eq(hasGuestColumns ? 'guest_id' : 'user_id', currentGuestId!) as typeof myPlayerQuery
 
   const { data: myPlayerRaw } = await myPlayerQuery.maybeSingle()
 
   if (!myPlayerRaw) redirect(currentUserId ? '/dashboard' : '/')
-  const myRole    = myPlayerRaw.role as Role
-  const myIsAlive = myPlayerRaw.is_alive as boolean
+  const myPlayer = myPlayerRaw as unknown as { role: Role; is_alive: boolean }
+  const myRole    = myPlayer.role
+  const myIsAlive = myPlayer.is_alive
 
   // ── Room settings ─────────────────────────────────────────────────────────
   const { data: room } = await supabase
@@ -55,7 +58,6 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
     .eq('id', game.room_id)
     .single()
 
-  // Guests are never host (only auth users can create rooms)
   const isHost =
     (!!currentUserId  && room?.host_user_id  === currentUserId) ||
     (!!currentGuestId && (room as { host_guest_id?: string | null })?.host_guest_id === currentGuestId)
@@ -64,23 +66,41 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
   // ── Public player list (no roles unless dead + revealRoleOnDeath) ─────────
   const { data: gamePlayers } = await supabase
     .from('game_players')
-    .select('user_id, guest_id, role, is_alive, display_name')
+    .select(gamePlayersSelect(hasGuestColumns))
     .eq('game_id', gameId)
 
   // Build display names: prefer game_players.display_name (guests), else room_players lookup
   const { data: roomPlayers } = await supabase
     .from('room_players')
-    .select('user_id, guest_id, display_name')
+    .select(hasGuestColumns ? 'user_id, guest_id, display_name' : 'user_id, display_name')
     .eq('room_id', game.room_id)
 
-  const userDisplayMap  = new Map(roomPlayers?.map((p) => [p.user_id,  p.display_name]) ?? [])
-  const guestDisplayMap = new Map(roomPlayers?.map((p) => [p.guest_id, p.display_name]) ?? [])
+  const roomPlayerRows = (roomPlayers ?? []) as unknown as {
+    user_id: string | null
+    guest_id?: string | null
+    display_name: string
+  }[]
+
+  const userDisplayMap  = new Map(roomPlayerRows.map((p) => [p.user_id,  p.display_name]))
+  const guestDisplayMap = new Map(
+    hasGuestColumns
+      ? roomPlayerRows.map((p) => [p.guest_id, p.display_name])
+      : [],
+  )
 
   // Current player's stable ID for UI highlighting
   const myStableId = currentUserId ?? currentGuestId ?? ''
 
-  const players: PublicPlayer[] = (gamePlayers ?? []).map((gp) => {
-    const stableId = gp.user_id ?? gp.guest_id ?? gp.user_id
+  const gamePlayerRows = (gamePlayers ?? []) as unknown as {
+    user_id: string | null
+    guest_id?: string | null
+    display_name?: string | null
+    role: Role
+    is_alive: boolean
+  }[]
+
+  const players: PublicPlayer[] = gamePlayerRows.map((gp) => {
+    const stableId = gp.user_id ?? gp.guest_id ?? ''
     const displayName =
       gp.display_name ??
       (gp.user_id  ? userDisplayMap.get(gp.user_id)   : null) ??
@@ -97,17 +117,28 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
           : undefined,
     }
   })
+  const playerDisplayMap = new Map(players.map((p) => [p.user_id, p.display_name]))
 
   // ── Mafia teammates (only for Mafia players) ──────────────────────────────
   let mafiaTeammates: string[] = []
   if (myRole === 'MAFIA') {
-    // Fetch other Mafia members — exclude self by user_id or guest_id
-    let mafiaQ = supabase.from('game_players').select('user_id, guest_id, display_name').eq('game_id', gameId).eq('role', 'MAFIA')
-    if (currentUserId)  mafiaQ = mafiaQ.neq('user_id', currentUserId) as typeof mafiaQ
-    if (currentGuestId) mafiaQ = mafiaQ.neq('guest_id', currentGuestId) as typeof mafiaQ
-    const { data: mafiaRows } = await mafiaQ
-    mafiaTeammates = (mafiaRows ?? []).map((r) => {
-      if (r.display_name) return r.display_name as string
+    const { data: mafiaRows } = await supabase
+      .from('game_players')
+      .select(hasGuestColumns ? 'user_id, guest_id, display_name' : 'user_id')
+      .eq('game_id', gameId)
+      .eq('role', 'MAFIA')
+
+    const mafiaPlayerRows = (mafiaRows ?? []) as unknown as {
+      user_id: string | null
+      guest_id?: string | null
+      display_name?: string | null
+    }[]
+
+    mafiaTeammates = mafiaPlayerRows.filter((r) => {
+      const stableId = r.user_id ?? r.guest_id
+      return stableId && stableId !== myStableId
+    }).map((r) => {
+      if (r.display_name) return r.display_name
       const name = r.user_id
         ? (userDisplayMap.get(r.user_id) ?? r.user_id)
         : (guestDisplayMap.get(r.guest_id) ?? r.guest_id ?? 'Unknown')
@@ -157,7 +188,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
       .from('night_actions')
       .select('target_user_id')
       .eq('round_id', round.id)
-      .eq(currentUserId ? 'actor_user_id' : 'actor_guest_id', currentUserId ?? currentGuestId ?? '')
+      .eq(currentUserId ? 'actor_user_id' : hasGuestColumns ? 'actor_guest_id' : 'actor_user_id', currentUserId ?? currentGuestId ?? '')
       .eq('action_type', actionType)
       .maybeSingle()
     myNightActionTargetId = myAction ? myAction.target_user_id : null
@@ -183,7 +214,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
       .from('votes')
       .select('target_user_id')
       .eq('round_id', round.id)
-      .eq(currentUserId ? 'voter_user_id' : 'voter_guest_id', currentUserId ?? currentGuestId ?? '')
+      .eq(currentUserId ? 'voter_user_id' : hasGuestColumns ? 'voter_guest_id' : 'voter_user_id', currentUserId ?? currentGuestId ?? '')
       .maybeSingle()
     myVoteTargetId = myVote ? myVote.target_user_id : undefined
 
@@ -198,7 +229,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
       }
       voteCounts = [...counts.entries()].map(([uid, count]) => ({
         user_id: uid,
-        display_name: userDisplayMap.get(uid) ?? uid,
+        display_name: playerDisplayMap.get(uid) ?? uid,
         count,
       }))
     }
@@ -211,7 +242,6 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
         role={myRole}
         mafiaTeammates={mafiaTeammates}
         players={players.map((p) => ({ userId: p.user_id, name: p.display_name, isMe: p.user_id === myStableId }))}
-        phase={game.current_phase}
         gameId={gameId}
         isHost={isHost}
       />

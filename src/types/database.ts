@@ -90,7 +90,10 @@ export type GamePlayerRow = {
   id: string
   game_id: string
   room_id: string
-  user_id: string
+  user_id: string | null
+  guest_id: string | null
+  is_guest: boolean
+  display_name: string | null
   role: Role
   is_alive: boolean
   death_round_number: number | null
@@ -117,8 +120,10 @@ export type NightActionRow = {
   id: string
   game_id: string
   round_id: string
-  actor_user_id: string
+  actor_user_id: string | null
+  actor_guest_id: string | null
   action_type: NightActionType
+  // Stable target id: authenticated users use user_id, guests use guest_id.
   target_user_id: string | null
   submitted_at: string
 }
@@ -127,7 +132,9 @@ export type VoteRow = {
   id: string
   game_id: string
   round_id: string
-  voter_user_id: string
+  voter_user_id: string | null
+  voter_guest_id: string | null
+  // Stable target id: authenticated users use user_id, guests use guest_id.
   target_user_id: string | null
   submitted_at: string
 }
@@ -142,6 +149,7 @@ export type GameEventRow = {
   player_id: string | null
   target_player_id: string | null
   visibility: GameEventVisibility
+  // Stable recipient id: authenticated users use user_id, guests use guest_id.
   recipient_user_id: string | null
   message: string
   metadata: Record<string, unknown> | null
@@ -151,6 +159,7 @@ export type GameEventRow = {
 // ─── Shared view types (passed from server → client) ─────────────────────────
 
 export type PublicPlayer = {
+  // Stable public player id: authenticated users use user_id, guests use guest_id.
   user_id: string
   display_name: string
   is_alive: boolean

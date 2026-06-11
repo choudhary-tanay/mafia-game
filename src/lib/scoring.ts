@@ -6,6 +6,12 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Role, WinCondition } from '@/types/database'
 import { calculateScoreDelta } from '@/lib/game-engine'
+import {
+  hasGuestPlayerColumns,
+  legacyGuestIdsForUsers,
+  nightActionsResolutionSelect,
+  votesActorSelect,
+} from '@/lib/guest-schema'
 
 export async function computeAndPersistScores(
   supabase: SupabaseClient,
@@ -26,6 +32,8 @@ export async function computeAndPersistScores(
     return
   }
 
+  const hasGuestColumns = await hasGuestPlayerColumns(supabase)
+
   // ── Fetch all data needed for scoring ─────────────────────────────────────
   const [
     { data: players },
@@ -35,15 +43,17 @@ export async function computeAndPersistScores(
   ] = await Promise.all([
     supabase
       .from('game_players')
-      .select('user_id, guest_id, is_guest, role, is_alive, death_round_number')
+      .select(hasGuestColumns
+        ? 'user_id, guest_id, is_guest, role, is_alive, death_round_number'
+        : 'user_id, role, is_alive, death_round_number')
       .eq('game_id', gameId),
     supabase
       .from('night_actions')
-      .select('actor_user_id, action_type, target_user_id, round_id')
+      .select(`${nightActionsResolutionSelect(hasGuestColumns)}, round_id`)
       .eq('game_id', gameId),
     supabase
       .from('votes')
-      .select('voter_user_id, target_user_id')
+      .select(votesActorSelect(hasGuestColumns))
       .eq('game_id', gameId),
     supabase
       .from('game_events')
@@ -52,13 +62,53 @@ export async function computeAndPersistScores(
       .eq('event_type', 'PLAYER_SAVED_BY_DOCTOR'),
   ])
 
-  if (!players?.length) return
+  const playerRows = (players ?? []) as unknown as {
+    user_id: string | null
+    guest_id?: string | null
+    is_guest?: boolean | null
+    role: Role
+    is_alive: boolean
+    death_round_number: number | null
+  }[]
+  const nightActionRows = (nightActions ?? []) as unknown as {
+    actor_user_id: string | null
+    actor_guest_id?: string | null
+    action_type: string
+    target_user_id: string | null
+    round_id: string | null
+  }[]
+  const voteRows = (allVotes ?? []) as unknown as {
+    voter_user_id: string | null
+    voter_guest_id?: string | null
+    target_user_id: string | null
+  }[]
 
-  const mafiaIds = new Set(players.filter((p) => p.role === 'MAFIA').map((p) => p.user_id))
+  if (!playerRows.length) return
+
+  const legacyGuestIds = hasGuestColumns
+    ? new Set<string>()
+    : await legacyGuestIdsForUsers(
+        supabase,
+        playerRows
+          .map((p) => p.user_id)
+          .filter((id): id is string => Boolean(id)),
+      )
+
+  const stableId = (p: { user_id: string | null; guest_id?: string | null }) =>
+    p.user_id ?? p.guest_id ?? null
+  const mafiaIds = new Set(
+    playerRows
+      .filter((p) => p.role === 'MAFIA')
+      .map(stableId)
+      .filter((id): id is string => Boolean(id)),
+  )
   const savedRoundIds = new Set((saveEvents ?? []).map((e) => e.round_id).filter(Boolean))
 
   // ── Per-player calculation ─────────────────────────────────────────────────
-  for (const player of players) {
+  for (const player of playerRows) {
+    const playerStableId = stableId(player)
+    if (!playerStableId) continue
+
     const isWinner =
       (winner === 'MAFIA' && player.role === 'MAFIA') ||
       (winner === 'VILLAGE' && player.role !== 'MAFIA')
@@ -69,8 +119,8 @@ export async function computeAndPersistScores(
     // Doctor saves
     let doctorSaves = 0
     if (player.role === 'DOCTOR') {
-      const saves = (nightActions ?? []).filter(
-        (a) => a.actor_user_id === player.user_id && a.action_type === 'DOCTOR_SAVE',
+      const saves = nightActionRows.filter(
+        (a) => (a.actor_user_id ?? (a as { actor_guest_id?: string | null }).actor_guest_id) === playerStableId && a.action_type === 'DOCTOR_SAVE',
       )
       for (const s of saves) {
         if (savedRoundIds.has(s.round_id)) doctorSaves++
@@ -80,8 +130,8 @@ export async function computeAndPersistScores(
     // Detective finds
     let detectiveFinds = 0
     if (player.role === 'DETECTIVE') {
-      const checks = (nightActions ?? []).filter(
-        (a) => a.actor_user_id === player.user_id && a.action_type === 'DETECTIVE_CHECK',
+      const checks = nightActionRows.filter(
+        (a) => (a.actor_user_id ?? (a as { actor_guest_id?: string | null }).actor_guest_id) === playerStableId && a.action_type === 'DETECTIVE_CHECK',
       )
       for (const c of checks) {
         if (c.target_user_id && mafiaIds.has(c.target_user_id)) detectiveFinds++
@@ -89,7 +139,9 @@ export async function computeAndPersistScores(
     }
 
     // Correct votes
-    const myVotes = (allVotes ?? []).filter((v) => v.voter_user_id === player.user_id)
+    const myVotes = voteRows.filter(
+      (v) => (v.voter_user_id ?? (v as { voter_guest_id?: string | null }).voter_guest_id) === playerStableId,
+    )
     const correctVotes = myVotes.filter(
       (v) => v.target_user_id && mafiaIds.has(v.target_user_id),
     ).length
@@ -105,25 +157,43 @@ export async function computeAndPersistScores(
       correctVotes,
     })
 
-    const playerIsGuest = !!(player as { is_guest?: boolean }).is_guest
+    const playerIsGuest = hasGuestColumns
+      ? !!(player as { is_guest?: boolean }).is_guest
+      : legacyGuestIds.has(playerStableId)
     const playerGuestId = (player as { guest_id?: string | null }).guest_id ?? null
 
     // ── Insert stat row ───────────────────────────────────────────────────────
-    await supabase.from('player_game_stats').insert({
-      game_id: gameId,
-      user_id:  playerIsGuest ? null : player.user_id,
-      guest_id: playerIsGuest ? playerGuestId : null,
-      is_guest: playerIsGuest,
-      role: player.role,
-      team,
-      won: isWinner,
-      survived_to_end: survivedToEnd,
-      eliminated_round_number: player.death_round_number ?? null,
-      correct_votes_against_mafia: correctVotes,
-      successful_doctor_saves: doctorSaves,
-      successful_detective_finds: detectiveFinds,
-      score_delta: delta,
-    })
+    await supabase.from('player_game_stats').insert(
+      hasGuestColumns
+        ? {
+            game_id: gameId,
+            user_id:  playerIsGuest ? null : player.user_id,
+            guest_id: playerIsGuest ? playerGuestId : null,
+            is_guest: playerIsGuest,
+            role: player.role,
+            team,
+            won: isWinner,
+            survived_to_end: survivedToEnd,
+            eliminated_round_number: player.death_round_number ?? null,
+            correct_votes_against_mafia: correctVotes,
+            successful_doctor_saves: doctorSaves,
+            successful_detective_finds: detectiveFinds,
+            score_delta: delta,
+          }
+        : {
+            game_id: gameId,
+            user_id: playerStableId,
+            role: player.role,
+            team,
+            won: isWinner,
+            survived_to_end: survivedToEnd,
+            eliminated_round_number: player.death_round_number ?? null,
+            correct_votes_against_mafia: correctVotes,
+            successful_doctor_saves: doctorSaves,
+            successful_detective_finds: detectiveFinds,
+            score_delta: delta,
+          },
+    )
 
     // Guests don't have a profile — skip the aggregate update
     if (playerIsGuest || !player.user_id) continue

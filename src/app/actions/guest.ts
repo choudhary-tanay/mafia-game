@@ -2,12 +2,19 @@
 
 import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/server'
-import { createGuestSession, deleteGuestSession } from '@/lib/guest-session'
+import { createGuestSession, deleteGuestSession, getGuestSession } from '@/lib/guest-session'
 import { getSession } from '@/lib/session'
+import {
+  ensureLegacyGuestUser,
+  hasGuestPlayerColumns,
+  playerIdentityFilter,
+  roomPlayerInsertPayload,
+} from '@/lib/guest-schema'
 
 export type GuestActionState = {
   errors?: Record<string, string[]>
   generalError?: string
+  redirectTo?: string
 } | undefined
 
 export async function joinAsGuest(
@@ -33,6 +40,35 @@ export async function joinAsGuest(
   if (!room) return { generalError: 'This room does not exist or has expired.' }
   if (room.status !== 'LOBBY') return { generalError: 'This game has already started.' }
 
+  const session = await getSession()
+  const guestSession = session?.userId ? null : await getGuestSession()
+  const hasGuestColumns = await hasGuestPlayerColumns(supabase)
+
+  if (session?.userId) {
+    const { data: alreadyIn } = await supabase
+      .from('room_players')
+      .select('id')
+      .eq('room_id', room.id)
+      .eq('user_id', session.userId)
+      .maybeSingle()
+
+    if (alreadyIn) return { redirectTo: `/lobby/${room.code}` }
+  } else if (guestSession?.guestId) {
+    const { data: alreadyIn } = await supabase
+      .from('room_players')
+      .select('id')
+      .eq('room_id', room.id)
+      .match(playerIdentityFilter({
+        userId: null,
+        guestId: guestSession.guestId,
+        isGuest: true,
+        displayName: guestSession.displayName,
+      }, hasGuestColumns))
+      .maybeSingle()
+
+    if (alreadyIn) return { redirectTo: `/lobby/${room.code}` }
+  }
+
   // Duplicate name check
   const { data: existing } = await supabase
     .from('room_players')
@@ -43,60 +79,58 @@ export async function joinAsGuest(
 
   if (existing) return { generalError: 'Someone in this room is already using that name.' }
 
-  // If logged in, use existing account flow via room actions instead
-  const session = await getSession()
+  // If logged in, use the authenticated identity with the display name chosen for this room
   if (session?.userId) {
-    // Authenticated user went through the guest join form — add them properly
-    const { data: alreadyIn } = await supabase
-      .from('room_players')
-      .select('id')
-      .eq('room_id', room.id)
-      .eq('user_id', session.userId)
-      .maybeSingle()
+    const { data: user } = await supabase
+      .from('users')
+      .select('full_name, avatar_url')
+      .eq('id', session.userId)
+      .single()
 
-    if (!alreadyIn) {
-      const { data: user } = await supabase
-        .from('users')
-        .select('full_name, avatar_url')
-        .eq('id', session.userId)
-        .single()
+    if (!user) redirect('/login')
 
-      if (user) {
-        await supabase.from('room_players').insert({
-          room_id: room.id,
-          user_id: session.userId,
-          guest_id: null,
-          is_guest: false,
-          display_name: displayName || user.full_name,
-          avatar_url: user.avatar_url ?? null,
-          is_host: false,
-          is_connected: true,
-        })
-      }
-    }
-    redirect(`/lobby/${room.code}`)
+    const { error } = await supabase.from('room_players').insert(
+      roomPlayerInsertPayload({
+        hasGuestColumns,
+        roomId: room.id,
+        userId: session.userId,
+        displayName: displayName || user.full_name,
+        avatarUrl: user.avatar_url ?? null,
+        isHost: false,
+      }),
+    )
+
+    if (error) return { generalError: 'Could not join room. Please try again.' }
+    return { redirectTo: `/lobby/${room.code}` }
   }
 
   // Guest join
   const guestId = crypto.randomUUID()
 
-  await supabase.from('room_players').insert({
-    room_id: room.id,
-    user_id: null,
-    guest_id: guestId,
-    is_guest: true,
-    display_name: displayName,
-    avatar_url: null,
-    is_host: false,
-    is_connected: true,
-  })
+  if (!hasGuestColumns) {
+    const compatibilityError = await ensureLegacyGuestUser(supabase, guestId, displayName)
+    if (compatibilityError) {
+      return { generalError: 'Could not create guest session. Please try again.' }
+    }
+  }
+
+  const { error } = await supabase.from('room_players').insert(
+    roomPlayerInsertPayload({
+      hasGuestColumns,
+      roomId: room.id,
+      guestId,
+      displayName,
+      isHost: false,
+    }),
+  )
+
+  if (error) return { generalError: 'Could not join room. Please try again.' }
 
   await createGuestSession(guestId, displayName, room.id)
-  redirect(`/lobby/${room.code}`)
+  return { redirectTo: `/lobby/${room.code}` }
 }
 
 export async function leaveRoomAsGuest(roomCode: string): Promise<void> {
-  const { getGuestSession } = await import('@/lib/guest-session')
   const guest = await getGuestSession()
   if (!guest) redirect('/')
 
@@ -109,11 +143,17 @@ export async function leaveRoomAsGuest(roomCode: string): Promise<void> {
     .maybeSingle()
 
   if (room) {
+    const hasGuestColumns = await hasGuestPlayerColumns(supabase)
     await supabase
       .from('room_players')
       .delete()
       .eq('room_id', room.id)
-      .eq('guest_id', guest.guestId)
+      .match(playerIdentityFilter({
+        userId: null,
+        guestId: guest.guestId,
+        isGuest: true,
+        displayName: guest.displayName,
+      }, hasGuestColumns))
   }
 
   await deleteGuestSession()

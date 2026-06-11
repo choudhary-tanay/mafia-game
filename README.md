@@ -298,6 +298,14 @@ alter table public.votes drop constraint if exists votes_round_id_voter_user_id_
 create unique index if not exists v_round_user  on public.votes (round_id, voter_user_id)  where voter_user_id  is not null;
 create unique index if not exists v_round_guest on public.votes (round_id, voter_guest_id) where voter_guest_id is not null;
 
+-- ── target ids are stable player ids now (user_id for accounts, guest_id for guests)
+-- The original Phase 4 schema constrained these target/recipient fields to users(id),
+-- which blocks guest targets during night actions, votes, eliminations, and private results.
+alter table public.night_actions drop constraint if exists night_actions_target_user_id_fkey;
+alter table public.votes drop constraint if exists votes_target_user_id_fkey;
+alter table public.game_events drop constraint if exists game_events_target_player_id_fkey;
+alter table public.game_events drop constraint if exists game_events_recipient_user_id_fkey;
+
 -- ── player_game_stats: make user_id nullable, add guest columns ─────────────
 alter table public.player_game_stats alter column user_id drop not null;
 alter table public.player_game_stats add column if not exists guest_id  uuid;

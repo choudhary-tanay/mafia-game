@@ -1,16 +1,22 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useActionState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { createRoomAsGuest } from '@/app/actions/room'
 import type { GuestActionState } from '@/app/actions/guest'
 import Input from '@/components/ui/Input'
 import Button from '@/components/ui/Button'
 
 export default function CreateRoomForm() {
+  const router = useRouter()
   const [state, action, pending] = useActionState<GuestActionState, FormData>(
     createRoomAsGuest,
     undefined,
   )
+
+  useEffect(() => {
+    if (state?.redirectTo) router.replace(state.redirectTo)
+  }, [router, state?.redirectTo])
 
   return (
     <form action={action} className="flex flex-col gap-3">
@@ -27,7 +33,7 @@ export default function CreateRoomForm() {
         maxLength={24}
         error={state?.errors?.displayName?.[0]}
       />
-      <Button type="submit" loading={pending} className="w-full py-3">
+      <Button type="submit" loading={pending || !!state?.redirectTo} className="w-full py-3">
         Create a room
       </Button>
     </form>

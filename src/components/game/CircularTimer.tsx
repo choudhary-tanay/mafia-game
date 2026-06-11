@@ -5,6 +5,11 @@ import { useEffect, useState } from 'react'
 const R = 38
 const CIRC = 2 * Math.PI * R
 
+function getRemainingSeconds(deadline: string | null, now: number): number | null {
+  if (!deadline) return null
+  return Math.max(0, Math.floor((new Date(deadline).getTime() - now) / 1000))
+}
+
 export default function CircularTimer({
   deadline,
   totalSeconds,
@@ -12,24 +17,19 @@ export default function CircularTimer({
   deadline: string | null
   totalSeconds: number
 }) {
-  const [secs, setSecs] = useState<number | null>(null)
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
-    if (!deadline) { setSecs(null); return }
-    const tick = () => {
-      const diff = Math.max(0, Math.floor((new Date(deadline).getTime() - Date.now()) / 1000))
-      setSecs(diff)
-    }
-    tick()
-    const id = setInterval(tick, 1000)
+    if (!deadline) return
+    const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
   }, [deadline])
 
+  const secs = getRemainingSeconds(deadline, now)
   if (secs === null) return null
 
   const pct = totalSeconds > 0 ? Math.min(1, secs / totalSeconds) : 0
   const dash = CIRC * pct
-  const gap = CIRC - dash
   const urgent = secs <= 10
   const stroke = urgent ? '#ef4444' : secs <= 30 ? '#f59e0b' : 'var(--accent)'
 

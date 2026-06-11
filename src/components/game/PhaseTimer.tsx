@@ -2,20 +2,21 @@
 
 import { useEffect, useState } from 'react'
 
+function getRemainingSeconds(deadline: string | null, now: number): number | null {
+  if (!deadline) return null
+  return Math.max(0, Math.floor((new Date(deadline).getTime() - now) / 1000))
+}
+
 export default function PhaseTimer({ deadline }: { deadline: string | null }) {
-  const [secs, setSecs] = useState<number | null>(null)
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
-    if (!deadline) { setSecs(null); return }
-    const tick = () => {
-      const diff = Math.max(0, Math.floor((new Date(deadline).getTime() - Date.now()) / 1000))
-      setSecs(diff)
-    }
-    tick()
-    const id = setInterval(tick, 1000)
+    if (!deadline) return
+    const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
   }, [deadline])
 
+  const secs = getRemainingSeconds(deadline, now)
   if (secs === null) return null
 
   const m = Math.floor(secs / 60)

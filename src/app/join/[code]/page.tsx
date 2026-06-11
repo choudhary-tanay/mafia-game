@@ -1,7 +1,10 @@
 import { getSession } from '@/lib/session'
+import { getGuestSession } from '@/lib/guest-session'
 import { createServiceClient } from '@/lib/supabase/server'
+import { hasGuestPlayerColumns, playerIdentityFilter } from '@/lib/guest-schema'
 import GuestJoinForm from '@/components/join/GuestJoinForm'
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 
 export async function generateMetadata({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params
@@ -23,6 +26,7 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
   // Prefill name if user is already logged in
   let prefillName = ''
   const session = await getSession()
+  const guestSession = session?.userId ? null : await getGuestSession()
   if (session?.userId) {
     const { data: user } = await supabase
       .from('users')
@@ -30,6 +34,8 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
       .eq('id', session.userId)
       .single()
     if (user) prefillName = user.full_name as string
+  } else if (guestSession?.displayName) {
+    prefillName = guestSession.displayName
   }
 
   if (!room) {
@@ -64,6 +70,32 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
         </div>
       </main>
     )
+  }
+
+  const hasGuestColumns = await hasGuestPlayerColumns(supabase)
+  if (session?.userId) {
+    const { data: existing } = await supabase
+      .from('room_players')
+      .select('id')
+      .eq('room_id', room.id)
+      .eq('user_id', session.userId)
+      .maybeSingle()
+
+    if (existing) redirect(`/lobby/${room.code}`)
+  } else if (guestSession?.guestId) {
+    const { data: existing } = await supabase
+      .from('room_players')
+      .select('id')
+      .eq('room_id', room.id)
+      .match(playerIdentityFilter({
+        userId: null,
+        guestId: guestSession.guestId,
+        isGuest: true,
+        displayName: guestSession.displayName,
+      }, hasGuestColumns))
+      .maybeSingle()
+
+    if (existing) redirect(`/lobby/${room.code}`)
   }
 
   // Count players already in the room
