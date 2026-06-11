@@ -205,7 +205,8 @@ export default function GameView(props: GameViewProps) {
               )}
 
               {/* After vote — host advances */}
-              {phase === 'VOTE_RESOLUTION' && isHost && !phaseDeadline && (
+              {/* Fallback button — auto-advance via maybeAdvancePhase handles this normally */}
+              {phase === 'VOTE_RESOLUTION' && isHost && (
                 <form action={beginNextNight.bind(null, gameId)} className="animate-fade-up">
                   <Button type="submit" className="w-full">Begin next night</Button>
                 </form>

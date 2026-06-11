@@ -1,7 +1,59 @@
 // Pure game-engine helpers — no 'use server', no next/headers.
 // Called from server actions and the game page server component.
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { WinCondition } from '@/types/database'
+import type { Role, WinCondition } from '@/types/database'
+
+// ─── Role assignment ──────────────────────────────────────────────────────────
+// Exported so game.ts and tests can both import it.
+
+export function buildRoleList(playerCount: number, mafiaCount: number): Role[] {
+  const roles: Role[] = []
+  for (let i = 0; i < mafiaCount; i++) roles.push('MAFIA')
+  const nonMafia = playerCount - mafiaCount
+  if (nonMafia >= 2) roles.push('DOCTOR')
+  if (nonMafia >= 4) roles.push('DETECTIVE')  // 5+ players needed for Detective (per PRD)
+  while (roles.length < playerCount) roles.push('VILLAGER')
+  // Fisher-Yates shuffle
+  for (let i = roles.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[roles[i], roles[j]] = [roles[j], roles[i]]
+  }
+  return roles
+}
+
+// ─── Score calculation (pure, no DB) ─────────────────────────────────────────
+
+export function calculateScoreDelta({
+  role,
+  isWinner,
+  winner,
+  survivedToEnd,
+  doctorSaves,
+  detectiveFinds,
+  correctVotes,
+}: {
+  role: Role
+  isWinner: boolean
+  winner: NonNullable<WinCondition>
+  survivedToEnd: boolean
+  doctorSaves: number
+  detectiveFinds: number
+  correctVotes: number
+}): number {
+  let delta = isWinner
+    ? winner === 'MAFIA'
+      ? 120  // Mafia win bonus
+      : 100  // Village win
+    : 25     // Lose — participation
+
+  delta += survivedToEnd ? 50 : 5  // survived bonus / eliminated participation
+
+  if (role === 'DOCTOR')    delta += doctorSaves    * 40
+  if (role === 'DETECTIVE') delta += detectiveFinds * 40
+  delta += correctVotes * 20
+
+  return delta
+}
 
 // ─── Win condition ────────────────────────────────────────────────────────────
 
@@ -17,7 +69,7 @@ export async function checkWinCondition(
 
   if (!data) return null
 
-  const aliveMafia = data.filter((p) => p.role === 'MAFIA').length
+  const aliveMafia  = data.filter((p) => p.role === 'MAFIA').length
   const aliveOthers = data.filter((p) => p.role !== 'MAFIA').length
 
   if (aliveMafia === 0) return 'VILLAGE'
@@ -27,9 +79,6 @@ export async function checkWinCondition(
 
 // ─── Night readiness ──────────────────────────────────────────────────────────
 
-// Returns true when all alive Mafia have submitted a kill AND
-// all alive Doctors/Detectives have submitted their action.
-// Used to auto-resolve night without waiting for the deadline.
 export async function areNightActionsComplete(
   supabase: SupabaseClient,
   gameId: string,
@@ -43,8 +92,8 @@ export async function areNightActionsComplete(
 
   if (!alive) return false
 
-  const aliveMafia = alive.filter((p) => p.role === 'MAFIA').map((p) => p.user_id)
-  const aliveDoctors = alive.filter((p) => p.role === 'DOCTOR').map((p) => p.user_id)
+  const aliveMafia      = alive.filter((p) => p.role === 'MAFIA').map((p) => p.user_id)
+  const aliveDoctors    = alive.filter((p) => p.role === 'DOCTOR').map((p) => p.user_id)
   const aliveDetectives = alive.filter((p) => p.role === 'DETECTIVE').map((p) => p.user_id)
 
   const { data: actions } = await supabase
@@ -52,17 +101,17 @@ export async function areNightActionsComplete(
     .select('actor_user_id, action_type')
     .eq('round_id', roundId)
 
-  const submitted = new Map<string, Set<string>>() // userId → Set<actionType>
+  const submitted = new Map<string, Set<string>>()
   for (const a of actions ?? []) {
     if (!submitted.has(a.actor_user_id)) submitted.set(a.actor_user_id, new Set())
     submitted.get(a.actor_user_id)!.add(a.action_type)
   }
 
-  // At least one Mafia member must have submitted a MAFIA_KILL
-  const mafiaKillSubmitted = aliveMafia.some((id) =>
-    submitted.get(id)?.has('MAFIA_KILL'),
-  )
-  if (aliveMafia.length > 0 && !mafiaKillSubmitted) return false
+  // At least one Mafia member must have submitted MAFIA_KILL
+  if (aliveMafia.length > 0) {
+    const hasKill = aliveMafia.some((id) => submitted.get(id)?.has('MAFIA_KILL'))
+    if (!hasKill) return false
+  }
 
   for (const id of aliveDoctors) {
     if (!submitted.get(id)?.has('DOCTOR_SAVE')) return false

@@ -6,6 +6,7 @@ import { getSession } from '@/lib/session'
 import { validateLobby } from '@/lib/lobby'
 import { computeAndPersistScores } from '@/lib/scoring'
 import {
+  buildRoleList,
   checkWinCondition,
   areNightActionsComplete,
   areAllVotesIn,
@@ -22,20 +23,7 @@ import {
 import type { Role, WinCondition } from '@/types/database'
 
 // ─── Phase 3: start game ──────────────────────────────────────────────────────
-
-function buildRoleList(playerCount: number, mafiaCount: number): Role[] {
-  const roles: Role[] = []
-  for (let i = 0; i < mafiaCount; i++) roles.push('MAFIA')
-  const nonMafia = playerCount - mafiaCount
-  if (nonMafia >= 2) roles.push('DOCTOR')
-  if (nonMafia >= 3) roles.push('DETECTIVE')
-  while (roles.length < playerCount) roles.push('VILLAGER')
-  for (let i = roles.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[roles[i], roles[j]] = [roles[j], roles[i]]
-  }
-  return roles
-}
+// buildRoleList is imported from lib/game-engine.ts (exported for testing)
 
 export async function startGame(roomCode: string): Promise<void> {
   const session = await getSession()
@@ -336,6 +324,43 @@ export async function maybeAdvancePhase(gameId: string): Promise<boolean> {
   }
   if (phase === 'VOTING') {
     if (round) await resolveVote(supabase, gameId, round.id)
+    return true
+  }
+
+  // VOTE_RESOLUTION: auto-advance to next night after the 5s show-results window.
+  if (phase === 'VOTE_RESOLUTION') {
+    const { data: room } = await supabase
+      .from('rooms')
+      .select('night_timer_seconds')
+      .eq('id', game.room_id)
+      .single()
+
+    const nextRound = game.current_round_number + 1
+
+    // Atomic: only create round if still in VOTE_RESOLUTION
+    const { data: newRound, error: roundErr } = await supabase
+      .from('rounds')
+      .insert({ game_id: gameId, round_number: nextRound, phase: 'NIGHT_ACTIONS_OPEN' })
+      .select('id')
+      .single()
+
+    if (roundErr || !newRound) return false // round already created by another request
+
+    const { error: advanceErr } = await supabase
+      .from('games')
+      .update({
+        current_phase: 'NIGHT_ACTIONS_OPEN',
+        status: 'NIGHT_ACTIONS_OPEN',
+        current_round_number: nextRound,
+        phase_deadline: futureDeadline(room?.night_timer_seconds ?? 60),
+      })
+      .eq('id', gameId)
+      .eq('current_phase', 'VOTE_RESOLUTION')
+
+    if (!advanceErr && newRound) {
+      await addEvent(supabase, gameId, newRound.id, 'NIGHT_STARTED', 'PUBLIC', null,
+        `Night ${nextRound} begins. The village falls asleep.`)
+    }
     return true
   }
 

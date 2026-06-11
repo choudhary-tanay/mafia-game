@@ -4,19 +4,8 @@
 // (retry, page refresh, concurrent request) exits early with no side effects.
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { WinCondition } from '@/types/database'
-
-// ─── Score constants ──────────────────────────────────────────────────────────
-const POINTS = {
-  WIN_VILLAGE: 100,
-  WIN_MAFIA: 120,       // Mafia winners get slightly more
-  LOSE: 25,             // Participation points
-  SURVIVED: 50,
-  ELIMINATED: 5,        // Extra participation if killed
-  DOCTOR_SAVE: 40,
-  DETECTIVE_FIND: 40,
-  CORRECT_VOTE: 20,
-} as const
+import type { Role, WinCondition } from '@/types/database'
+import { calculateScoreDelta } from '@/lib/game-engine'
 
 export async function computeAndPersistScores(
   supabase: SupabaseClient,
@@ -77,17 +66,7 @@ export async function computeAndPersistScores(
     const team = player.role === 'MAFIA' ? 'MAFIA' : 'VILLAGE'
     const survivedToEnd = player.is_alive as boolean
 
-    // Base points
-    let delta = isWinner
-      ? winner === 'MAFIA'
-        ? POINTS.WIN_MAFIA
-        : POINTS.WIN_VILLAGE
-      : POINTS.LOSE
-
-    // Survival
-    delta += survivedToEnd ? POINTS.SURVIVED : POINTS.ELIMINATED
-
-    // Doctor: count rounds where this doctor's save target equals the Mafia kill target
+    // Doctor saves
     let doctorSaves = 0
     if (player.role === 'DOCTOR') {
       const saves = (nightActions ?? []).filter(
@@ -96,10 +75,9 @@ export async function computeAndPersistScores(
       for (const s of saves) {
         if (savedRoundIds.has(s.round_id)) doctorSaves++
       }
-      delta += doctorSaves * POINTS.DOCTOR_SAVE
     }
 
-    // Detective: count rounds where the investigated player was Mafia
+    // Detective finds
     let detectiveFinds = 0
     if (player.role === 'DETECTIVE') {
       const checks = (nightActions ?? []).filter(
@@ -108,15 +86,24 @@ export async function computeAndPersistScores(
       for (const c of checks) {
         if (c.target_user_id && mafiaIds.has(c.target_user_id)) detectiveFinds++
       }
-      delta += detectiveFinds * POINTS.DETECTIVE_FIND
     }
 
-    // Correct votes against Mafia (any round)
+    // Correct votes
     const myVotes = (allVotes ?? []).filter((v) => v.voter_user_id === player.user_id)
     const correctVotes = myVotes.filter(
       (v) => v.target_user_id && mafiaIds.has(v.target_user_id),
     ).length
-    delta += correctVotes * POINTS.CORRECT_VOTE
+
+    // Use the pure calculateScoreDelta (shared with tests)
+    const delta = calculateScoreDelta({
+      role: player.role as Role,
+      isWinner,
+      winner,
+      survivedToEnd,
+      doctorSaves,
+      detectiveFinds,
+      correctVotes,
+    })
 
     // ── Insert stat row (unique(game_id, user_id) protects from duplicates) ──
     await supabase.from('player_game_stats').insert({
