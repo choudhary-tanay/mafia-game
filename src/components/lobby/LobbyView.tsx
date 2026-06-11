@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import type { RoomRow, RoomPlayerRow } from '@/types/database'
 import { validateLobby, recommendedMafiaCount, formatTimer } from '@/lib/lobby'
 import { leaveRoom, updateSettings } from '@/app/actions/room'
+import { startGame } from '@/app/actions/game'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
@@ -44,6 +45,7 @@ export default function LobbyView({ room, players, currentUserId }: Props) {
       : `/lobby/${room.code}`
 
   const leaveAction = leaveRoom.bind(null, room.code)
+  const startGameAction = startGame.bind(null, room.code)
   const [settingsState, settingsAction, settingsPending] = useActionState(
     updateSettings,
     undefined,
@@ -138,19 +140,18 @@ export default function LobbyView({ room, players, currentUserId }: Props) {
                 <h2 className="mb-1 font-semibold text-text-primary">Start the game</h2>
                 <p className="mb-4 text-sm text-text-muted">
                   {validation.canStart
-                    ? 'Lobby is ready. Role assignment coming in Phase 3.'
+                    ? 'Lobby is ready. Roles will be assigned secretly when you start.'
                     : 'Fix the warnings above before starting.'}
                 </p>
-                <Button
-                  disabled
-                  className="w-full"
-                  title="Role assignment implemented in Phase 3"
-                >
-                  Start game
-                </Button>
-                <p className="mt-2 text-center text-xs text-text-muted">
-                  Coming in Phase 3
-                </p>
+                <form action={startGameAction}>
+                  <Button
+                    type="submit"
+                    disabled={!validation.canStart}
+                    className="w-full"
+                  >
+                    Start game
+                  </Button>
+                </form>
               </div>
             ) : (
               <div className="rounded-xl border border-border bg-surface p-5 text-center">

@@ -35,6 +35,20 @@ export default async function LobbyPage({ params }: { params: Promise<{ code: st
     redirect('/dashboard')
   }
 
+  // Room is ACTIVE — find the current game and send the player there
+  if (typedRoom.status === 'ACTIVE') {
+    const { data: activeGame } = await supabase
+      .from('games')
+      .select('id')
+      .eq('room_id', typedRoom.id)
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (activeGame) redirect(`/game/${activeGame.id}`)
+    else redirect('/dashboard')
+  }
+
   // Check if user is in the room
   const { data: mySlot } = await supabase
     .from('room_players')

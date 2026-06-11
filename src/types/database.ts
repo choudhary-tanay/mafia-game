@@ -55,3 +55,44 @@ export type RoomPlayerRow = {
   is_connected: boolean
   joined_at: string
 }
+
+// ─── Phase 3 ─────────────────────────────────────────────────────────────────
+
+export type Role = 'MAFIA' | 'DOCTOR' | 'DETECTIVE' | 'VILLAGER'
+export type GamePhase =
+  | 'ROLE_REVEAL'
+  | 'NIGHT_STARTED'
+  | 'NIGHT_ACTIONS_OPEN'
+  | 'NIGHT_RESOLUTION'
+  | 'DAY_ANNOUNCEMENT'
+  | 'DISCUSSION'
+  | 'VOTING'
+  | 'VOTE_RESOLUTION'
+  | 'GAME_OVER'
+
+export type GameRow = {
+  id: string
+  room_id: string
+  status: GamePhase
+  current_phase: GamePhase
+  current_round_number: number
+  winning_team: string | null
+  started_at: string
+  ended_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type GamePlayerRow = {
+  id: string
+  game_id: string
+  room_id: string
+  user_id: string
+  role: Role
+  is_alive: boolean
+  death_round_number: number | null
+  death_cause: string | null
+  survived_to_end: boolean
+  created_at: string
+  updated_at: string
+}

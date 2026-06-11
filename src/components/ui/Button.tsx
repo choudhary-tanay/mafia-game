@@ -1,6 +1,7 @@
 'use client'
 
 import { type ButtonHTMLAttributes } from 'react'
+import { useFormStatus } from 'react-dom'
 
 type Variant = 'primary' | 'ghost' | 'danger'
 
@@ -14,8 +15,7 @@ const variants: Record<Variant, string> = {
     'bg-accent hover:bg-accent-hover text-white font-semibold shadow-lg transition-colors',
   ghost:
     'border border-border text-text-muted hover:text-text-primary hover:border-text-muted transition-colors',
-  danger:
-    'bg-red-800 hover:bg-red-700 text-white font-semibold transition-colors',
+  danger: 'bg-red-800 hover:bg-red-700 text-white font-semibold transition-colors',
 }
 
 export default function Button({
@@ -26,9 +26,12 @@ export default function Button({
   className = '',
   ...props
 }: ButtonProps) {
+  const { pending } = useFormStatus()
+  const isLoading = loading || pending
+
   return (
     <button
-      disabled={disabled || loading}
+      disabled={disabled || isLoading}
       className={`
         inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm
         focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60
@@ -37,7 +40,7 @@ export default function Button({
       `}
       {...props}
     >
-      {loading && (
+      {isLoading && (
         <span className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
       )}
       {children}

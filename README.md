@@ -117,6 +117,54 @@ create table public.room_players (
 alter table public.room_players enable row level security;
 ```
 
+### 3c. Phase 3 — Games and role tables
+
+Run this as a **third** query in the SQL Editor:
+
+```sql
+-- Games table
+create table public.games (
+  id                   uuid default gen_random_uuid() primary key,
+  room_id              uuid not null references public.rooms(id) on delete cascade,
+  status               text default 'ROLE_REVEAL' not null,
+  current_phase        text default 'ROLE_REVEAL' not null,
+  current_round_number integer default 0 not null,
+  winning_team         text,
+  started_at           timestamptz default now() not null,
+  ended_at             timestamptz,
+  created_at           timestamptz default now() not null,
+  updated_at           timestamptz default now() not null
+);
+
+alter table public.games enable row level security;
+
+create trigger on_games_updated
+  before update on public.games
+  for each row execute procedure public.handle_updated_at();
+
+-- Game players table (roles stored here — never over-fetched)
+create table public.game_players (
+  id                uuid default gen_random_uuid() primary key,
+  game_id           uuid not null references public.games(id) on delete cascade,
+  room_id           uuid not null references public.rooms(id),
+  user_id           uuid not null references public.users(id),
+  role              text not null,
+  is_alive          boolean default true not null,
+  death_round_number integer,
+  death_cause       text,
+  survived_to_end   boolean default false not null,
+  created_at        timestamptz default now() not null,
+  updated_at        timestamptz default now() not null,
+  unique(game_id, user_id)
+);
+
+alter table public.game_players enable row level security;
+
+create trigger on_game_players_updated
+  before update on public.game_players
+  for each row execute procedure public.handle_updated_at();
+```
+
 ### 4. Get your API keys
 
 In the Supabase dashboard, go to **Project Settings → API**.
