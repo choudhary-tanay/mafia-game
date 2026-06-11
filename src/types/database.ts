@@ -1,4 +1,5 @@
-// Row types matching the Supabase `users` table (snake_case columns)
+// ─── Phase 1 ─────────────────────────────────────────────────────────────────
+
 export type UserRow = {
   id: string
   full_name: string
@@ -24,6 +25,33 @@ export type UserRow = {
   updated_at: string
 }
 
-// Add future table row types here as phases are implemented:
-// export type RoomRow = { ... }
-// export type GameRow = { ... }
+// ─── Phase 2 ─────────────────────────────────────────────────────────────────
+
+export type RoomStatus = 'LOBBY' | 'ACTIVE' | 'ENDED'
+export type TieRule = 'NO_ELIMINATION'
+
+export type RoomRow = {
+  id: string
+  code: string
+  host_user_id: string
+  status: RoomStatus
+  mafia_count: number
+  discussion_timer_seconds: number
+  voting_timer_seconds: number
+  night_timer_seconds: number
+  reveal_role_on_death: boolean
+  tie_rule: TieRule
+  created_at: string
+  updated_at: string
+}
+
+export type RoomPlayerRow = {
+  id: string
+  room_id: string
+  user_id: string
+  display_name: string
+  avatar_url: string | null
+  is_host: boolean
+  is_connected: boolean
+  joined_at: string
+}

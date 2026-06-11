@@ -1,0 +1,239 @@
+'use server'
+
+import { redirect } from 'next/navigation'
+import { createServiceClient } from '@/lib/supabase/server'
+import { getSession } from '@/lib/session'
+import { joinRoomSchema, updateSettingsSchema } from '@/lib/validations'
+
+export type RoomActionState = {
+  errors?: Record<string, string[]>
+  generalError?: string
+} | undefined
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+async function generateUniqueCode(
+  supabase: ReturnType<typeof createServiceClient>,
+): Promise<string> {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+  for (let i = 0; i < 10; i++) {
+    const code = Array.from(
+      { length: 6 },
+      () => chars[Math.floor(Math.random() * chars.length)],
+    ).join('')
+    const { data } = await supabase
+      .from('rooms')
+      .select('id')
+      .eq('code', code)
+      .maybeSingle()
+    if (!data) return code
+  }
+  throw new Error('Could not generate a unique room code')
+}
+
+// ─── Actions ─────────────────────────────────────────────────────────────────
+
+export async function createRoom(): Promise<void> {
+  const session = await getSession()
+  if (!session?.userId) redirect('/login')
+
+  const supabase = createServiceClient()
+
+  // If user is already in a lobby, send them there
+  const { data: existing } = await supabase
+    .from('room_players')
+    .select('room_id, rooms!inner(code, status)')
+    .eq('user_id', session.userId)
+    .eq('rooms.status', 'LOBBY')
+    .maybeSingle()
+
+  if (existing) {
+    const roomData = existing.rooms as unknown as { code: string }
+    redirect(`/lobby/${roomData.code}`)
+  }
+
+  const { data: user } = await supabase
+    .from('users')
+    .select('full_name, avatar_url')
+    .eq('id', session.userId)
+    .single()
+
+  if (!user) redirect('/login')
+
+  const code = await generateUniqueCode(supabase)
+
+  const { data: room, error } = await supabase
+    .from('rooms')
+    .insert({
+      code,
+      host_user_id: session.userId,
+      status: 'LOBBY',
+      mafia_count: 1,
+      discussion_timer_seconds: 180,
+      voting_timer_seconds: 60,
+      night_timer_seconds: 60,
+      reveal_role_on_death: true,
+      tie_rule: 'NO_ELIMINATION',
+    })
+    .select('id, code')
+    .single()
+
+  if (error || !room) redirect('/dashboard')
+
+  await supabase.from('room_players').insert({
+    room_id: room.id,
+    user_id: session.userId,
+    display_name: user.full_name,
+    avatar_url: user.avatar_url ?? null,
+    is_host: true,
+    is_connected: true,
+  })
+
+  redirect(`/lobby/${room.code}`)
+}
+
+export async function joinRoom(
+  state: RoomActionState,
+  formData: FormData,
+): Promise<RoomActionState> {
+  const session = await getSession()
+  if (!session?.userId) redirect('/login')
+
+  const raw = { code: (formData.get('code') as string | null)?.toUpperCase() ?? '' }
+  const result = joinRoomSchema.safeParse(raw)
+
+  if (!result.success) {
+    return { errors: result.error.flatten().fieldErrors as Record<string, string[]> }
+  }
+
+  const supabase = createServiceClient()
+  const { data: room } = await supabase
+    .from('rooms')
+    .select('id, code, status')
+    .eq('code', result.data.code)
+    .maybeSingle()
+
+  if (!room) return { generalError: 'Room not found. Check the code and try again.' }
+  if (room.status !== 'LOBBY') return { generalError: 'This game has already started.' }
+
+  // Already in room?
+  const { data: existing } = await supabase
+    .from('room_players')
+    .select('id')
+    .eq('room_id', room.id)
+    .eq('user_id', session.userId)
+    .maybeSingle()
+
+  if (existing) redirect(`/lobby/${room.code}`)
+
+  const { data: user } = await supabase
+    .from('users')
+    .select('full_name, avatar_url')
+    .eq('id', session.userId)
+    .single()
+
+  if (!user) redirect('/login')
+
+  const { error } = await supabase.from('room_players').insert({
+    room_id: room.id,
+    user_id: session.userId,
+    display_name: user.full_name,
+    avatar_url: user.avatar_url ?? null,
+    is_host: false,
+    is_connected: true,
+  })
+
+  if (error) return { generalError: 'Could not join room. Please try again.' }
+
+  redirect(`/lobby/${room.code}`)
+}
+
+export async function leaveRoom(roomCode: string): Promise<void> {
+  const session = await getSession()
+  if (!session?.userId) redirect('/login')
+
+  const supabase = createServiceClient()
+  const { data: room } = await supabase
+    .from('rooms')
+    .select('id, host_user_id, status')
+    .eq('code', roomCode)
+    .maybeSingle()
+
+  if (!room || room.status !== 'LOBBY') redirect('/dashboard')
+
+  await supabase
+    .from('room_players')
+    .delete()
+    .eq('room_id', room.id)
+    .eq('user_id', session.userId)
+
+  const { data: remaining } = await supabase
+    .from('room_players')
+    .select('user_id')
+    .eq('room_id', room.id)
+    .order('joined_at', { ascending: true })
+
+  if (!remaining || remaining.length === 0) {
+    await supabase.from('rooms').delete().eq('id', room.id)
+  } else if (room.host_user_id === session.userId) {
+    const newHostId = remaining[0].user_id
+    await supabase.from('rooms').update({ host_user_id: newHostId }).eq('id', room.id)
+    await supabase
+      .from('room_players')
+      .update({ is_host: true })
+      .eq('room_id', room.id)
+      .eq('user_id', newHostId)
+  }
+
+  redirect('/dashboard')
+}
+
+export async function updateSettings(
+  state: RoomActionState,
+  formData: FormData,
+): Promise<RoomActionState> {
+  const session = await getSession()
+  if (!session?.userId) redirect('/login')
+
+  const roomCode = formData.get('roomCode') as string
+
+  const raw = {
+    mafiaCount: formData.get('mafiaCount'),
+    discussionTimerSeconds: formData.get('discussionTimerSeconds'),
+    votingTimerSeconds: formData.get('votingTimerSeconds'),
+    nightTimerSeconds: formData.get('nightTimerSeconds'),
+  }
+
+  const result = updateSettingsSchema.safeParse(raw)
+  if (!result.success) {
+    return { errors: result.error.flatten().fieldErrors as Record<string, string[]> }
+  }
+
+  const revealRoleOnDeath = formData.get('revealRoleOnDeath') === 'on'
+  const supabase = createServiceClient()
+
+  const { data: room } = await supabase
+    .from('rooms')
+    .select('id, host_user_id')
+    .eq('code', roomCode)
+    .maybeSingle()
+
+  if (!room) redirect('/dashboard')
+  if (room.host_user_id !== session.userId) {
+    return { generalError: 'Only the host can update settings.' }
+  }
+
+  const { error } = await supabase
+    .from('rooms')
+    .update({
+      mafia_count: result.data.mafiaCount,
+      discussion_timer_seconds: result.data.discussionTimerSeconds,
+      voting_timer_seconds: result.data.votingTimerSeconds,
+      night_timer_seconds: result.data.nightTimerSeconds,
+      reveal_role_on_death: revealRoleOnDeath,
+    })
+    .eq('id', room.id)
+
+  if (error) return { generalError: 'Could not save settings.' }
+  return undefined
+}

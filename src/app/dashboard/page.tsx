@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation'
 import { getSession } from '@/lib/session'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logout } from '@/app/actions/auth'
+import { createRoom } from '@/app/actions/room'
+import JoinRoomForm from '@/components/dashboard/JoinRoomForm'
 import Button from '@/components/ui/Button'
 
 export const metadata = { title: 'Dashboard — Mafia' }
@@ -17,7 +19,6 @@ export default async function DashboardPage() {
     .eq('id', session.userId)
     .single()
 
-  // No matching user (stale session, deleted account, or bad UUID) → clear & re-login
   if (error || !user) redirect('/login')
 
   const rank = getRank(user.total_score)
@@ -40,6 +41,7 @@ export default async function DashboardPage() {
 
       <main className="flex-1 px-4 py-10">
         <div className="mx-auto max-w-4xl space-y-8">
+          {/* Welcome */}
           <div>
             <h1 className="text-3xl font-bold text-text-primary">
               Welcome, {user.full_name.split(' ')[0]}
@@ -50,27 +52,32 @@ export default async function DashboardPage() {
             </p>
           </div>
 
+          {/* Quick actions */}
           <div className="grid gap-4 sm:grid-cols-2">
+            {/* Create room */}
             <div className="rounded-xl border border-border bg-surface p-6">
               <h2 className="mb-1 font-semibold text-text-primary">Create a room</h2>
               <p className="mb-4 text-sm text-text-muted">
                 Host a new game and invite your friends with a room code.
               </p>
-              <Button disabled className="w-full" title="Coming in Phase 2">
-                Create room
-              </Button>
+              <form action={createRoom}>
+                <Button type="submit" className="w-full">
+                  Create room
+                </Button>
+              </form>
             </div>
+
+            {/* Join room */}
             <div className="rounded-xl border border-border bg-surface p-6">
               <h2 className="mb-1 font-semibold text-text-primary">Join a room</h2>
               <p className="mb-4 text-sm text-text-muted">
-                Enter a room code to join a game already in progress.
+                Enter a 6-character room code to join a game.
               </p>
-              <Button disabled variant="ghost" className="w-full" title="Coming in Phase 2">
-                Join room
-              </Button>
+              <JoinRoomForm />
             </div>
           </div>
 
+          {/* Stats */}
           <div>
             <h2 className="mb-4 text-lg font-semibold text-text-primary">Your stats</h2>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

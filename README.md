@@ -74,6 +74,49 @@ create trigger on_users_updated
 
 3. You should see "Success. No rows returned." — the table is ready.
 
+### 3b. Phase 2 — Rooms and lobby tables
+
+Run this as a **second** query in the SQL Editor:
+
+```sql
+-- Rooms table
+create table public.rooms (
+  id                        uuid default gen_random_uuid() primary key,
+  code                      text unique not null,
+  host_user_id              uuid not null references public.users(id) on delete cascade,
+  status                    text default 'LOBBY' not null,
+  mafia_count               integer default 1 not null,
+  discussion_timer_seconds  integer default 180 not null,
+  voting_timer_seconds      integer default 60 not null,
+  night_timer_seconds       integer default 60 not null,
+  reveal_role_on_death      boolean default true not null,
+  tie_rule                  text default 'NO_ELIMINATION' not null,
+  created_at                timestamptz default now() not null,
+  updated_at                timestamptz default now() not null
+);
+
+alter table public.rooms enable row level security;
+
+create trigger on_rooms_updated
+  before update on public.rooms
+  for each row execute procedure public.handle_updated_at();
+
+-- Room players table
+create table public.room_players (
+  id           uuid default gen_random_uuid() primary key,
+  room_id      uuid not null references public.rooms(id) on delete cascade,
+  user_id      uuid not null references public.users(id) on delete cascade,
+  display_name text not null,
+  avatar_url   text,
+  is_host      boolean default false not null,
+  is_connected boolean default true not null,
+  joined_at    timestamptz default now() not null,
+  unique(room_id, user_id)
+);
+
+alter table public.room_players enable row level security;
+```
+
 ### 4. Get your API keys
 
 In the Supabase dashboard, go to **Project Settings → API**.
