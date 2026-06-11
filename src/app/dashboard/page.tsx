@@ -11,13 +11,14 @@ export default async function DashboardPage() {
   if (!session?.userId) redirect('/login')
 
   const supabase = createServiceClient()
-  const { data: user } = await supabase
+  const { data: user, error } = await supabase
     .from('users')
     .select('full_name, email, total_score, total_games_played, total_wins, total_losses')
     .eq('id', session.userId)
     .single()
 
-  if (!user) redirect('/login')
+  // No matching user (stale session, deleted account, or bad UUID) → clear & re-login
+  if (error || !user) redirect('/login')
 
   const rank = getRank(user.total_score)
 

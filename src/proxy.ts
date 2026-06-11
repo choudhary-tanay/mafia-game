@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { decrypt } from '@/lib/session'
+import { decrypt } from '@/lib/jwt'
 
 const protectedRoutes = ['/dashboard']
 const publicAuthRoutes = ['/login', '/signup']
