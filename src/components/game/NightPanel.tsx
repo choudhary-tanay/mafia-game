@@ -3,6 +3,8 @@
 import { useState, useTransition } from 'react'
 import { submitNightAction } from '@/app/actions/game'
 import type { Role, PublicPlayer } from '@/types/database'
+import type { NightQuestionAnswerRow } from '@/app/actions/night-question'
+import NightQuestionCard from './NightQuestionCard'
 import { Check, Loader2, Skull, Target } from 'lucide-react'
 
 type Props = {
@@ -13,6 +15,10 @@ type Props = {
   currentUserId: string
   submittedTargetId: string | null
   mafiaCurrentTarget: string | null
+  // Phase 9 — Night Engagement
+  roundId?: string | null
+  nightQuestion?: string
+  myNightQuestionAnswer?: NightQuestionAnswerRow | null
 }
 
 const ROLE_CFG: Record<string, {
@@ -66,6 +72,7 @@ const AVATAR_COLORS = [
 
 export default function NightPanel({
   gameId, myRole, isAlive, players, currentUserId, submittedTargetId, mafiaCurrentTarget,
+  roundId, nightQuestion, myNightQuestionAnswer,
 }: Props) {
   const [selected, setSelected] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(submittedTargetId !== null)
@@ -88,30 +95,31 @@ export default function NightPanel({
     )
   }
 
-  if (myRole === 'VILLAGER') {
-    return (
-      <div className="rounded-2xl border border-border bg-surface p-6 text-center">
-        <p className="text-3xl mb-3">😴</p>
-        <p className="text-sm font-semibold text-text-primary">You have no night action.</p>
-        <p className="text-xs text-text-muted mt-1">Villagers wait for morning. Stay calm, stay hidden.</p>
-      </div>
-    )
-  }
+  // Villagers have no action — GameView renders the NightQuestionCard for them instead.
+  if (myRole === 'VILLAGER') return null
 
+  // After action submitted: compact indicator + Night Question card immediately.
+  // Using local `submitted` state (not server props) so there's no refresh delay.
   if (submitted || submittedTargetId !== null) {
-    const targetName = players.find((p) => p.user_id === (submittedTargetId ?? selected))?.display_name
     return (
-      <div className={`rounded-2xl border ${cfg.border} ${cfg.bg} p-6 text-center`}>
-        <div className="flex items-center justify-center gap-2 mb-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-900/40">
-            <Check size={20} className="text-emerald-400" />
+      <div className="space-y-3">
+        {/* Compact submitted indicator */}
+        <div className={`flex items-center gap-3 rounded-xl border ${cfg.border} ${cfg.bg} px-4 py-2.5`}>
+          <Check size={15} className="text-emerald-400 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <span className="text-sm font-semibold text-emerald-400">Action submitted</span>
+            <span className="text-xs text-text-faint ml-2">Waiting for night to end…</span>
           </div>
         </div>
-        <p className={`text-base font-bold mb-1 ${cfg.accentText}`}>Action submitted</p>
-        {targetName && (
-          <p className="text-sm text-text-muted">Target: <span className="font-semibold text-text-primary">{targetName}</span></p>
+        {/* Night engagement question — shown immediately after action */}
+        {roundId && nightQuestion && (
+          <NightQuestionCard
+            gameId={gameId}
+            roundId={roundId}
+            question={nightQuestion}
+            existingAnswer={myNightQuestionAnswer}
+          />
         )}
-        <p className="text-xs text-text-faint mt-3">Waiting for other night actions…</p>
       </div>
     )
   }

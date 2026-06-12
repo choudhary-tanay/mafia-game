@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { beginNight, beginNextNight, endDiscussionEarly } from '@/app/actions/game'
@@ -9,11 +9,14 @@ import AnnouncementFeed from './AnnouncementFeed'
 import CircularTimer from './CircularTimer'
 import PhaseBanner from './PhaseBanner'
 import NightPanel from './NightPanel'
+import NightQuestionCard from './NightQuestionCard'
 import VotingPanel from './VotingPanel'
 import RulesButton from '@/components/rules/RulesModal'
 import type { Role, GamePhase, PublicPlayer, Announcement } from '@/types/database'
+import type { NightQuestionAnswerRow } from '@/app/actions/night-question'
+import { getRandomQuestion } from '@/lib/night-questions'
 import Button from '@/components/ui/Button'
-import { Skull, Play, ChevronRight } from 'lucide-react'
+import { Skull, Play, ChevronRight, MessageCircle } from 'lucide-react'
 
 type VoteCount = { user_id: string; display_name: string; count: number }
 
@@ -38,6 +41,10 @@ export type GameViewProps = {
   voteCounts?: VoteCount[]
   revealRoleOnDeath: boolean
   timers?: { night: number; discussion: number; voting: number }
+  // Phase 9 — Night Engagement
+  roundId?: string | null
+  myNightQuestionAnswer?: NightQuestionAnswerRow | null
+  nightThoughts?: string[]
 }
 
 const ROLE_COLOR: Record<Role, string> = {
@@ -79,8 +86,12 @@ export default function GameView(props: GameViewProps) {
     myRole, myIsAlive, isHost, currentUserId, players,
     announcements, detectiveResult, myNightActionTargetId,
     mafiaCurrentTarget, myVoteTargetId, voteCounts, timers,
+    roundId, myNightQuestionAnswer, nightThoughts = [],
     isGuest = false,
   } = props
+
+  // Stable random question for this session — only used if no stored answer exists
+  const [nightQuestion] = useState(() => getRandomQuestion())
 
   const router = useRouter()
   const [endingDiscussion, startEndDiscussion] = useTransition()
@@ -197,17 +208,37 @@ export default function GameView(props: GameViewProps) {
                 </div>
               )}
 
-              {/* Night action panel */}
+              {/* Night action panel + engagement question */}
               {phase === 'NIGHT_ACTIONS_OPEN' && (
-                <NightPanel
-                  gameId={gameId}
-                  myRole={myRole}
-                  isAlive={myIsAlive}
-                  players={players}
-                  currentUserId={currentUserId}
-                  submittedTargetId={myNightActionTargetId ?? null}
-                  mafiaCurrentTarget={mafiaCurrentTarget}
-                />
+                <>
+                  {/* Role-specific action panel.
+                      For special roles: shows action selection, then compact "submitted"
+                      indicator + NightQuestionCard after submit (all handled inside NightPanel).
+                      For Villagers: renders null (handled below). */}
+                  <NightPanel
+                    gameId={gameId}
+                    myRole={myRole}
+                    isAlive={myIsAlive}
+                    players={players}
+                    currentUserId={currentUserId}
+                    submittedTargetId={myNightActionTargetId ?? null}
+                    mafiaCurrentTarget={mafiaCurrentTarget}
+                    roundId={roundId}
+                    nightQuestion={nightQuestion}
+                    myNightQuestionAnswer={myNightQuestionAnswer}
+                  />
+
+                  {/* Night Question for Villagers — shown immediately since they
+                      have no action to submit first. Dead villagers are excluded. */}
+                  {myRole === 'VILLAGER' && myIsAlive && roundId && (
+                    <NightQuestionCard
+                      gameId={gameId}
+                      roundId={roundId}
+                      question={nightQuestion}
+                      existingAnswer={myNightQuestionAnswer}
+                    />
+                  )}
+                </>
               )}
 
               {/* Night resolving */}
@@ -268,6 +299,31 @@ export default function GameView(props: GameViewProps) {
                       Voting starts automatically when the timer ends, or when the host decides.
                     </p>
                   )}
+                </div>
+              )}
+
+              {/* Night Thoughts — anonymous answers from last night, shown during discussion */}
+              {(phase === 'DISCUSSION' || phase === 'DAY_ANNOUNCEMENT') && nightThoughts.length > 0 && (
+                <div className="rounded-2xl border border-blue-900/30 bg-blue-950/15 overflow-hidden animate-fade-up">
+                  <div className="flex items-center gap-3 px-5 py-3 border-b border-border/50">
+                    <MessageCircle size={15} className="text-blue-400" />
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-widest text-blue-400">Night Thoughts</p>
+                      <p className="text-xs text-text-faint">Whispers from the village while everyone waited for morning.</p>
+                    </div>
+                  </div>
+                  <div className="p-4 space-y-2">
+                    {nightThoughts.map((thought, i) => (
+                      <div key={i} className="flex items-start gap-2.5 rounded-xl bg-blue-950/20 border border-blue-900/20 px-4 py-3">
+                        <span className="text-blue-600 text-sm mt-0.5 flex-shrink-0">&ldquo;</span>
+                        <p className="text-sm text-text-primary leading-relaxed">{thought}</p>
+                        <span className="text-blue-600 text-sm self-end flex-shrink-0">&rdquo;</span>
+                      </div>
+                    ))}
+                    <p className="text-xs text-text-faint text-center pt-1">
+                      Anonymous · Sharing your thoughts does not reveal your role.
+                    </p>
+                  </div>
                 </div>
               )}
 

@@ -4,6 +4,7 @@ import { getGuestSession } from '@/lib/guest-session'
 import { createServiceClient } from '@/lib/supabase/server'
 import { gamePlayersSelect, hasGuestPlayerColumns } from '@/lib/guest-schema'
 import { maybeAdvancePhase } from '@/app/actions/game'
+import { getMyNightQuestionAnswer, getNightThoughts } from '@/app/actions/night-question'
 import RoleRevealCard from '@/components/game/RoleRevealCard'
 import GameView, { type GameViewProps } from '@/components/game/GameView'
 import type { GameRow, Role, PublicPlayer, Announcement } from '@/types/database'
@@ -240,6 +241,25 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
     }
   }
 
+  // ── Night Engagement: question answer + night thoughts ───────────────────
+  let myNightQuestionAnswer = null
+  let nightThoughts: string[] = []
+
+  if (round) {
+    const nightPhases = ['NIGHT_ACTIONS_OPEN', 'NIGHT_RESOLUTION']
+    const dayPhases   = ['DISCUSSION', 'DAY_ANNOUNCEMENT', 'VOTING', 'VOTE_RESOLUTION', 'GAME_OVER']
+
+    if (nightPhases.includes(game.current_phase)) {
+      // Fetch the player's existing answer (for refresh resilience)
+      myNightQuestionAnswer = await getMyNightQuestionAnswer(round.id)
+    }
+    if (dayPhases.includes(game.current_phase)) {
+      // Fetch anonymous answers from the most-recently-completed night round
+      // (same round_id — round persists through day phases)
+      nightThoughts = await getNightThoughts(gameId, round.id)
+    }
+  }
+
   // ── Initial ROLE_REVEAL screen ────────────────────────────────────────────
   if (game.current_phase === 'ROLE_REVEAL') {
     return (
@@ -273,6 +293,9 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
     voteCounts,
     revealRoleOnDeath,
     isGuest: !!currentGuestId,
+    roundId: round?.id ?? null,
+    myNightQuestionAnswer,
+    nightThoughts,
     timers: {
       night: room?.night_timer_seconds ?? 60,
       discussion: room?.discussion_timer_seconds ?? 180,
