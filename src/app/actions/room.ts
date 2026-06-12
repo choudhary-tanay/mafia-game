@@ -4,14 +4,13 @@ import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getSession } from '@/lib/session'
 import { getPlayerIdentity } from '@/lib/identity'
-import { createGuestSession } from '@/lib/guest-session'
+import { createGuestSession, getGuestSession } from '@/lib/guest-session'
 import {
   ensureLegacyGuestUser,
   hasGuestPlayerColumns,
-  legacyGuestIdsForUsers,
-  playerIdentityFilter,
   roomPlayerInsertPayload,
 } from '@/lib/guest-schema'
+import { leaveAllLobbyRooms, removeFromRoomWithPromotion } from '@/lib/room-membership'
 import { joinRoomSchema, updateSettingsSchema } from '@/lib/validations'
 import { type GuestActionState } from '@/app/actions/guest'
 
@@ -52,6 +51,26 @@ function identityIsHost(
   return false
 }
 
+/** Picks a display name that's free in the room, suffixing "2", "3", … when
+ *  the desired one is taken (case-insensitive). */
+async function resolveUniqueDisplayName(
+  supabase: ReturnType<typeof createServiceClient>,
+  roomId: string,
+  desired: string,
+): Promise<string> {
+  const { data: rows } = await supabase
+    .from('room_players')
+    .select('display_name')
+    .eq('room_id', roomId)
+  const taken = new Set((rows ?? []).map((r) => (r.display_name as string).toLowerCase()))
+  if (!taken.has(desired.toLowerCase())) return desired
+  for (let i = 2; i <= 99; i++) {
+    const candidate = `${desired} ${i}`
+    if (!taken.has(candidate.toLowerCase())) return candidate
+  }
+  return `${desired} ${crypto.randomUUID().slice(0, 4)}`
+}
+
 // ─── Actions ─────────────────────────────────────────────────────────────────
 
 /** Create a room as an authenticated user */
@@ -61,18 +80,11 @@ export async function createRoom(): Promise<void> {
 
   const supabase = createServiceClient()
 
-  // If user is already in a lobby, send them there
-  const { data: existing } = await supabase
-    .from('room_players')
-    .select('room_id, rooms!inner(code, status)')
-    .eq('user_id', session.userId)
-    .eq('rooms.status', 'LOBBY')
-    .maybeSingle()
-
-  if (existing) {
-    const roomData = existing.rooms as unknown as { code: string }
-    redirect(`/lobby/${roomData.code}`)
-  }
+  // Clean exit from any lobby they're still in (with host promotion) so
+  // "Create room" always does what it says without leaving ghost members.
+  await leaveAllLobbyRooms(supabase, {
+    userId: session.userId, guestId: null, isGuest: false, displayName: null,
+  })
 
   const { data: user } = await supabase
     .from('users')
@@ -123,7 +135,9 @@ export async function createRoom(): Promise<void> {
   redirect(`/lobby/${room.code}`)
 }
 
-/** Create a room as a guest (no account required) */
+/** Create a room from the landing page — works for guests AND logged-in users.
+ *  Logged-in users keep their real identity (host_user_id); guests get a
+ *  guest session cookie and host_guest_id. */
 export async function createRoomAsGuest(
   state: GuestActionState,
   formData: FormData,
@@ -136,14 +150,29 @@ export async function createRoomAsGuest(
     return { errors: { displayName: ['Name must be 24 characters or fewer.'] } }
 
   const supabase = createServiceClient()
-  const guestId = crypto.randomUUID()
-  const code    = await generateUniqueCode(supabase)
+  const session = await getSession()
+  // Reuse an existing guest identity so the same person stays recognizable
+  // across rooms (a fresh UUID every click leaves ghost rows behind).
+  const existingGuest = session?.userId ? null : await getGuestSession()
+  const guestId = session?.userId ? null : (existingGuest?.guestId ?? crypto.randomUUID())
+
+  // Clean exit from any lobby this identity is still in (host promotion runs).
+  if (session?.userId || existingGuest?.guestId) {
+    await leaveAllLobbyRooms(supabase, {
+      userId: session?.userId ?? null,
+      guestId: session?.userId ? null : existingGuest!.guestId,
+      isGuest: !session?.userId,
+      displayName: null,
+    })
+  }
+
+  const code = await generateUniqueCode(supabase)
 
   const { data: room, error } = await supabase
     .from('rooms')
     .insert({
       code,
-      host_user_id: null,
+      host_user_id: session?.userId ?? null,
       host_guest_id: guestId,
       status: 'LOBBY',
       mafia_count: 1,
@@ -159,7 +188,7 @@ export async function createRoomAsGuest(
   if (error || !room) return { generalError: 'Could not create room. Please try again.' }
 
   const hasGuestColumns = await hasGuestPlayerColumns(supabase)
-  if (!hasGuestColumns) {
+  if (guestId && !hasGuestColumns) {
     const compatibilityError = await ensureLegacyGuestUser(supabase, guestId, displayName)
     if (compatibilityError) {
       await supabase.from('rooms').delete().eq('id', room.id)
@@ -171,6 +200,7 @@ export async function createRoomAsGuest(
     roomPlayerInsertPayload({
       hasGuestColumns,
       roomId: room.id,
+      userId: session?.userId ?? null,
       guestId,
       displayName,
       isHost: true,
@@ -182,8 +212,10 @@ export async function createRoomAsGuest(
     return { generalError: 'Could not add you to the room. Please try again.' }
   }
 
-  await createGuestSession(guestId, displayName, room.id)
-  return { redirectTo: `/lobby/${room.code}` }
+  if (guestId) await createGuestSession(guestId, displayName, room.id)
+  // Server-side redirect: Next serves a 303 with the guest cookie attached,
+  // so the client lands in the lobby with no extra client wiring.
+  redirect(`/lobby/${room.code}`)
 }
 
 export async function joinRoom(
@@ -227,13 +259,20 @@ export async function joinRoom(
 
   if (!user) redirect('/login')
 
+  // Clean exit from other lobbies (with host promotion) before joining this one.
+  await leaveAllLobbyRooms(supabase, {
+    userId: session.userId, guestId: null, isGuest: false, displayName: null,
+  })
+
+  const displayName = await resolveUniqueDisplayName(supabase, room.id, user.full_name as string)
+
   const hasGuestColumns = await hasGuestPlayerColumns(supabase)
   const { error } = await supabase.from('room_players').insert({
     ...roomPlayerInsertPayload({
       hasGuestColumns,
       roomId: room.id,
       userId: session.userId,
-      displayName: user.full_name as string,
+      displayName,
       avatarUrl: user.avatar_url ?? null,
       isHost: false,
     }),
@@ -259,48 +298,11 @@ export async function leaveRoom(roomCode: string): Promise<void> {
     redirect(identity.userId ? '/dashboard' : '/')
   }
 
-  // Remove this player from room_players
-  const hasGuestColumns = await hasGuestPlayerColumns(supabase)
-  await supabase.from('room_players').delete()
-    .eq('room_id', room.id)
-    .match(playerIdentityFilter(identity, hasGuestColumns))
-
-  const { data: remaining } = await supabase
-    .from('room_players')
-    .select(hasGuestColumns ? 'user_id, guest_id, is_guest' : 'user_id')
-    .eq('room_id', room.id)
-    .order('joined_at', { ascending: true })
-
-  if (!remaining || remaining.length === 0) {
-    await supabase.from('rooms').delete().eq('id', room.id)
-  } else if (identityIsHost(room as { host_user_id: string | null; host_guest_id: string | null }, identity)) {
-    // Promote first remaining player to host
-    const next = remaining[0] as unknown as { user_id: string | null; guest_id?: string | null; is_guest?: boolean | null }
-    let nextUserId = next.user_id ?? null
-    let nextGuestId = hasGuestColumns ? (next.guest_id ?? null) : null
-
-    if (!hasGuestColumns && nextUserId) {
-      const legacyGuestIds = await legacyGuestIdsForUsers(supabase, [nextUserId])
-      if (legacyGuestIds.has(nextUserId)) {
-        nextGuestId = nextUserId
-        nextUserId = null
-      }
-    }
-
-    await supabase.from('rooms').update({
-      host_user_id:  nextUserId,
-      host_guest_id: nextGuestId,
-    }).eq('id', room.id)
-
-    if (nextUserId) {
-      await supabase.from('room_players').update({ is_host: true })
-        .eq('room_id', room.id).eq('user_id', nextUserId)
-    } else if (nextGuestId) {
-      const hostQuery = supabase.from('room_players').update({ is_host: true }).eq('room_id', room.id)
-      if (hasGuestColumns) await hostQuery.eq('guest_id', nextGuestId)
-      else await hostQuery.eq('user_id', nextGuestId)
-    }
-  }
+  await removeFromRoomWithPromotion(
+    supabase,
+    room as { id: string; host_user_id: string | null; host_guest_id: string | null },
+    identity,
+  )
 
   redirect(identity.userId ? '/dashboard' : '/')
 }

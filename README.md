@@ -288,15 +288,18 @@ create unique index if not exists gp_game_guest on public.game_players (game_id,
 alter table public.night_actions alter column actor_user_id drop not null;
 alter table public.night_actions add column if not exists actor_guest_id uuid;
 alter table public.night_actions drop constraint if exists night_actions_round_id_actor_user_id_action_type_key;
-create unique index if not exists na_round_user  on public.night_actions (round_id, actor_user_id,  action_type) where actor_user_id  is not null;
-create unique index if not exists na_round_guest on public.night_actions (round_id, actor_guest_id, action_type) where actor_guest_id is not null;
+-- NOTE: full (non-partial) indexes — Postgres treats NULLs as distinct, so
+-- user rows and guest rows never collide, and unlike partial indexes these
+-- stay compatible with PostgREST upserts.
+create unique index if not exists na_round_user  on public.night_actions (round_id, actor_user_id,  action_type);
+create unique index if not exists na_round_guest on public.night_actions (round_id, actor_guest_id, action_type);
 
 -- ── votes: make voter_user_id nullable, add voter_guest_id ──────────────────
 alter table public.votes alter column voter_user_id drop not null;
 alter table public.votes add column if not exists voter_guest_id uuid;
 alter table public.votes drop constraint if exists votes_round_id_voter_user_id_key;
-create unique index if not exists v_round_user  on public.votes (round_id, voter_user_id)  where voter_user_id  is not null;
-create unique index if not exists v_round_guest on public.votes (round_id, voter_guest_id) where voter_guest_id is not null;
+create unique index if not exists v_round_user  on public.votes (round_id, voter_user_id);
+create unique index if not exists v_round_guest on public.votes (round_id, voter_guest_id);
 
 -- ── target ids are stable player ids now (user_id for accounts, guest_id for guests)
 -- The original Phase 4 schema constrained these target/recipient fields to users(id),
@@ -324,6 +327,15 @@ Run this as a **seventh** query in the SQL Editor:
 alter table public.rooms alter column host_user_id drop not null;
 alter table public.rooms add column if not exists host_guest_id uuid;
 ```
+
+### 3h. Schema hardening (recommended for existing databases)
+
+If your database was created with an earlier version of section 3f (which used
+*partial* unique indexes on `night_actions` and `votes`), run
+[`supabase-fixes.sql`](./supabase-fixes.sql) once in the SQL Editor. It
+replaces those partial indexes with full unique indexes and double-checks the
+`rounds` / `game_results` uniqueness backstops. The app works without it, but
+the database-level duplicate protection is worth having.
 
 ### 4. Get your API keys
 

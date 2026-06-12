@@ -18,6 +18,7 @@ type VoteCount = { user_id: string; display_name: string; count: number }
 
 export type GameViewProps = {
   gameId: string
+  roomCode?: string
   phase: GamePhase
   roundNumber: number
   phaseDeadline: string | null
@@ -35,13 +36,8 @@ export type GameViewProps = {
   myVoteTargetId: string | null | undefined
   voteCounts?: VoteCount[]
   revealRoleOnDeath: boolean
-}
-
-// Seconds per phase (for CircularTimer proportion)
-const PHASE_TOTAL: Partial<Record<GamePhase, number>> = {
-  NIGHT_ACTIONS_OPEN: 60,
-  DISCUSSION: 180,
-  VOTING: 60,
+  // Host-configured durations so the timer ring reflects reality
+  timers?: { night: number; discussion: number; voting: number }
 }
 
 const ROLE_COLOR: Record<Role, string> = {
@@ -67,18 +63,20 @@ const PHASE_BG: Partial<Record<GamePhase, string>> = {
 
 export default function GameView(props: GameViewProps) {
   const {
-    gameId, phase, roundNumber, phaseDeadline, winningTeam,
+    gameId, roomCode, phase, roundNumber, phaseDeadline, winningTeam,
     myRole, myIsAlive, isHost, currentUserId, players,
     announcements, detectiveResult, myNightActionTargetId,
-    mafiaCurrentTarget, myVoteTargetId, voteCounts,
+    mafiaCurrentTarget, myVoteTargetId, voteCounts, timers,
     isGuest = false,
   } = props
 
   const router = useRouter()
   const [endingDiscussion, startEndDiscussion] = useTransition()
+  const gameOver = phase === 'GAME_OVER'
 
   // ── Primary sync: Supabase Realtime broadcast ────────────────────────────
   useEffect(() => {
+    if (gameOver) return // nothing further can change
     const supabase = getBrowserClient()
     const channel = supabase
       .channel(`game:${gameId}`)
@@ -87,16 +85,23 @@ export default function GameView(props: GameViewProps) {
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [gameId, router])
+  }, [gameId, router, gameOver])
 
   // ── Fallback: poll every 5 s in case a broadcast is missed ───────────────
   useEffect(() => {
+    if (gameOver) return
     const id = setInterval(() => router.refresh(), 5000)
     return () => clearInterval(id)
-  }, [router])
+  }, [router, gameOver])
 
   const phaseBg = PHASE_BG[phase] ?? ''
-  const totalSecs = PHASE_TOTAL[phase] ?? 60
+  // Host-configured durations drive the ring; fall back to the defaults.
+  const phaseTotals: Partial<Record<GamePhase, number>> = {
+    NIGHT_ACTIONS_OPEN: timers?.night ?? 60,
+    DISCUSSION: timers?.discussion ?? 180,
+    VOTING: timers?.voting ?? 60,
+  }
+  const totalSecs = phaseTotals[phase] ?? 60
 
   return (
     <div className={`flex flex-1 flex-col ${phaseBg} transition-colors duration-700`}>
@@ -256,28 +261,40 @@ export default function GameView(props: GameViewProps) {
                       ? 'All Mafia players have been eliminated. The village is safe.'
                       : 'The Mafia now outnumber and control the village.'}
                   </p>
-                  {isGuest ? (
-                    <div className="space-y-2">
-                      <p className="text-xs text-amber-400">
-                        You played as a guest. Your score for this game is temporary.
-                      </p>
-                      <div className="flex flex-col sm:flex-row gap-2 justify-center mt-2">
-                        <Link href="/signup" className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover transition-colors">
-                          Create account to save score
-                        </Link>
-                        <Link href="/" className="rounded-lg border border-border px-5 py-2.5 text-sm text-text-muted hover:text-text-primary transition-colors">
-                          Continue as guest
+                  <div className="space-y-3">
+                    {roomCode && (
+                      <Link
+                        href={`/lobby/${roomCode}`}
+                        className="inline-block rounded-lg bg-accent px-6 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover transition-colors"
+                      >
+                        🔄 Play again — back to lobby
+                      </Link>
+                    )}
+                    {isGuest ? (
+                      <div className="space-y-2">
+                        <p className="text-xs text-amber-400">
+                          You played as a guest. Your score for this game is temporary.
+                        </p>
+                        <div className="flex flex-col sm:flex-row gap-2 justify-center">
+                          <Link href="/signup" className="rounded-lg border border-border px-5 py-2.5 text-sm text-text-muted hover:text-text-primary transition-colors">
+                            Create account to save scores
+                          </Link>
+                          <Link href="/" className="rounded-lg border border-border px-5 py-2.5 text-sm text-text-muted hover:text-text-primary transition-colors">
+                            Back to home
+                          </Link>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <Link
+                          href="/dashboard"
+                          className="inline-block rounded-lg border border-border px-6 py-2.5 text-sm text-text-muted hover:text-text-primary transition-colors"
+                        >
+                          Back to dashboard
                         </Link>
                       </div>
-                    </div>
-                  ) : (
-                    <Link
-                      href="/dashboard"
-                      className="inline-block mt-2 rounded-lg bg-accent px-6 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover transition-colors"
-                    >
-                      Back to dashboard
-                    </Link>
-                  )}
+                    )}
+                  </div>
                 </div>
               )}
 

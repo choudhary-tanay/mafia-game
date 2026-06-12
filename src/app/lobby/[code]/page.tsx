@@ -17,11 +17,13 @@ export default async function LobbyPage({ params }: { params: Promise<{ code: st
   const { code } = await params
   const upperCode = code.toUpperCase()
 
-  // Resolve identity — authenticated user or guest
+  // Resolve identity — authenticated user or guest. User session takes
+  // precedence (matching getPlayerIdentity) so a leftover guest cookie can't
+  // make client-side host/leave checks disagree with the server.
   const [userSession, guestSession] = await Promise.all([getSession(), getGuestSession()])
 
   const currentUserId   = userSession?.userId ?? null
-  const currentGuestId  = guestSession?.guestId ?? null
+  const currentGuestId  = currentUserId ? null : (guestSession?.guestId ?? null)
   const hasAnyAuth      = !!(currentUserId || currentGuestId)
 
   // No auth at all → redirect to the public join page
@@ -43,18 +45,19 @@ export default async function LobbyPage({ params }: { params: Promise<{ code: st
     redirect(currentUserId ? '/dashboard' : '/')
   }
 
-  // Active room → find the game and redirect there
+  // Active room → find the game and redirect there. If the game row isn't
+  // visible yet (start in progress), fall through and render the lobby — the
+  // 4s poll picks the game up moments later.
   if (typedRoom.status === 'ACTIVE') {
     const { data: activeGame } = await supabase
       .from('games')
-      .select('id')
+      .select('id, current_phase')
       .eq('room_id', typedRoom.id)
       .order('started_at', { ascending: false })
       .limit(1)
       .maybeSingle()
 
-    if (activeGame) redirect(`/game/${activeGame.id}`)
-    else redirect(currentUserId ? '/dashboard' : '/')
+    if (activeGame && activeGame.current_phase !== 'GAME_OVER') redirect(`/game/${activeGame.id}`)
   }
 
   // Check if this player is already in the room

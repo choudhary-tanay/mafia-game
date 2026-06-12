@@ -35,14 +35,6 @@ export default function VotingPanel({
     ? (myVoteTargetId === null ? 'ABSTAIN' : myVoteTargetId)
     : pending
 
-  if (!isAlive) {
-    return (
-      <div className="rounded-xl border border-border bg-surface p-5 text-center text-sm text-text-muted">
-        You are dead. Watch in silence.
-      </div>
-    )
-  }
-
   function submit(targetId: string | null) {
     startTransition(async () => {
       const res = await submitVote(gameId, targetId)
@@ -51,7 +43,8 @@ export default function VotingPanel({
     })
   }
 
-  // Results view (after vote resolution)
+  // Results view (after vote resolution) — public information, shown to
+  // everyone including eliminated players.
   if (isResolution && voteCounts) {
     const total = voteCounts.reduce((s, v) => s + v.count, 0)
     return (
@@ -69,6 +62,14 @@ export default function VotingPanel({
             <span className="text-xs text-text-muted w-4 text-right">{v.count}</span>
           </div>
         ))}
+      </div>
+    )
+  }
+
+  if (!isAlive) {
+    return (
+      <div className="rounded-xl border border-border bg-surface p-5 text-center text-sm text-text-muted">
+        You are dead. Watch in silence.
       </div>
     )
   }

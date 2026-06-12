@@ -13,10 +13,12 @@ export const metadata = { title: 'Game — Mafia' }
 export default async function GamePage({ params }: { params: Promise<{ gameId: string }> }) {
   const { gameId } = await params
 
-  // Resolve identity — authenticated user or guest
+  // Resolve identity — authenticated user or guest. The user session takes
+  // precedence everywhere (matching getPlayerIdentity), so a leftover guest
+  // cookie is ignored when logged in.
   const [userSession, guestSession] = await Promise.all([getSession(), getGuestSession()])
   const currentUserId  = userSession?.userId ?? null
-  const currentGuestId = guestSession?.guestId ?? null
+  const currentGuestId = currentUserId ? null : (guestSession?.guestId ?? null)
   if (!currentUserId && !currentGuestId) redirect('/')
 
   // Lazy phase advancement (deadline enforcement)
@@ -54,7 +56,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
   // ── Room settings ─────────────────────────────────────────────────────────
   const { data: room } = await supabase
     .from('rooms')
-    .select('host_user_id, host_guest_id, reveal_role_on_death')
+    .select('code, host_user_id, host_guest_id, reveal_role_on_death, night_timer_seconds, discussion_timer_seconds, voting_timer_seconds')
     .eq('id', game.room_id)
     .single()
 
@@ -167,15 +169,18 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
   // ── Detective private result (only for Detective) ─────────────────────────
   let detectiveResult: string | null = null
   if (myRole === 'DETECTIVE' && round) {
-    const { data: privEvent } = await supabase
+    // limit(1) instead of maybeSingle: a historical duplicate event must not
+    // error out and hide the result.
+    const { data: privEvents } = await supabase
       .from('game_events')
       .select('message')
       .eq('game_id', gameId)
       .eq('visibility', 'PRIVATE_TO_PLAYER')
       .eq('recipient_user_id', currentUserId ?? currentGuestId ?? '')
       .eq('round_id', round.id)
-      .maybeSingle()
-    detectiveResult = (privEvent as { message: string } | null)?.message ?? null
+      .order('created_at', { ascending: false })
+      .limit(1)
+    detectiveResult = (privEvents?.[0] as { message: string } | undefined)?.message ?? null
   }
 
   // ── My night action for this round ────────────────────────────────────────
@@ -250,6 +255,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
 
   const viewProps: GameViewProps = {
     gameId,
+    roomCode: (room as { code?: string } | null)?.code,
     phase: game.current_phase,
     roundNumber: game.current_round_number,
     phaseDeadline: game.phase_deadline,
@@ -267,6 +273,11 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
     voteCounts,
     revealRoleOnDeath,
     isGuest: !!currentGuestId,
+    timers: {
+      night: room?.night_timer_seconds ?? 60,
+      discussion: room?.discussion_timer_seconds ?? 180,
+      voting: room?.voting_timer_seconds ?? 60,
+    },
   }
 
   return <GameView {...viewProps} />

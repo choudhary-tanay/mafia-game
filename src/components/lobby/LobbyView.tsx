@@ -55,10 +55,11 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
       ? `${window.location.origin}/lobby/${room.code}`
       : `/lobby/${room.code}`
 
-  // Guests use a different leave action
-  const leaveAction = currentGuestId
-    ? leaveRoomAsGuest.bind(null, room.code)
-    : leaveRoom.bind(null, room.code)
+  // User identity takes precedence (matches getPlayerIdentity on the server) —
+  // a leftover guest cookie must not route a logged-in user to the guest leave.
+  const leaveAction = currentUserId
+    ? leaveRoom.bind(null, room.code)
+    : leaveRoomAsGuest.bind(null, room.code)
   const startGameAction = startGame.bind(null, room.code)
   const [settingsState, settingsAction, settingsPending] = useActionState(
     updateSettings,

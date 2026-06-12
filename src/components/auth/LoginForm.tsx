@@ -23,6 +23,7 @@ export default function LoginForm() {
         type="email"
         autoComplete="email"
         placeholder="you@example.com"
+        defaultValue={state?.values?.email}
         error={state?.errors?.email?.[0]}
       />
 

@@ -59,7 +59,7 @@ export default async function ProfilePage() {
     .eq('id', session.userId)
     .single()
 
-  if (error || !rawUser) redirect('/login')
+  if (error || !rawUser) redirect('/logout')
   const user = rawUser as unknown as UserProfile
 
   // Recent game history (last 12)

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { beginNight } from '@/app/actions/game'
+import { getBrowserClient } from '@/lib/supabase/client'
 import type { Role } from '@/types/database'
 import Button from '@/components/ui/Button'
 
@@ -16,7 +17,7 @@ type Props = {
 
 const ROLE_CONFIG: Record<
   Role,
-  { label: string; symbol: string; color: string; border: string; bg: string; instructions: string }
+  { label: string; symbol: string; color: string; border: string; bg: string; button: string; instructions: string }
 > = {
   MAFIA: {
     label: 'Mafia',
@@ -24,6 +25,7 @@ const ROLE_CONFIG: Record<
     color: 'text-red-400',
     border: 'border-red-600/50',
     bg: 'bg-red-950/20',
+    button: 'bg-red-600 hover:bg-red-500',
     instructions:
       'Each night, you and your Mafia team secretly choose one player to eliminate. During the day, blend in with the village. Your goal: equal or outnumber the innocent.',
   },
@@ -33,6 +35,7 @@ const ROLE_CONFIG: Record<
     color: 'text-blue-400',
     border: 'border-blue-600/50',
     bg: 'bg-blue-950/20',
+    button: 'bg-blue-600 hover:bg-blue-500',
     instructions:
       'Each night, choose one player to protect. If the Mafia targets your chosen player, they survive. You may protect yourself, but use that wisely.',
   },
@@ -42,6 +45,7 @@ const ROLE_CONFIG: Record<
     color: 'text-purple-400',
     border: 'border-purple-600/50',
     bg: 'bg-purple-950/20',
+    button: 'bg-purple-600 hover:bg-purple-500',
     instructions:
       'Each night, investigate one player. You will learn whether they are Mafia or not. Use your knowledge carefully — the Mafia will try to silence you.',
   },
@@ -51,6 +55,7 @@ const ROLE_CONFIG: Record<
     color: 'text-green-400',
     border: 'border-green-600/50',
     bg: 'bg-green-950/20',
+    button: 'bg-green-600 hover:bg-green-500',
     instructions:
       'You have no night ability. Your power is observation, discussion, and your vote. Watch for suspicious behaviour and help the village eliminate the Mafia.',
   },
@@ -61,11 +66,20 @@ export default function RoleRevealCard({ role, mafiaTeammates, players, gameId, 
   const router = useRouter()
   const cfg = ROLE_CONFIG[role]
 
+  // Keep syncing even while the card is still showing — when the host begins
+  // Night 1 the page must swap to the game view without a manual refresh.
   useEffect(() => {
-    if (!acknowledged) return
+    const supabase = getBrowserClient()
+    const channel = supabase
+      .channel(`game:${gameId}`)
+      .on('broadcast', { event: 'phase_changed' }, () => router.refresh())
+      .subscribe()
     const id = window.setInterval(() => router.refresh(), 3000)
-    return () => window.clearInterval(id)
-  }, [acknowledged, router])
+    return () => {
+      supabase.removeChannel(channel)
+      window.clearInterval(id)
+    }
+  }, [gameId, router])
 
   if (!acknowledged) {
     return (
@@ -113,10 +127,7 @@ export default function RoleRevealCard({ role, mafiaTeammates, players, gameId, 
           {/* Acknowledge button */}
           <button
             onClick={() => setAcknowledged(true)}
-            className={`w-full rounded-lg py-3 text-sm font-semibold transition-colors
-              bg-${role === 'MAFIA' ? 'red' : role === 'DOCTOR' ? 'blue' : role === 'DETECTIVE' ? 'purple' : 'green'}-600
-              hover:bg-${role === 'MAFIA' ? 'red' : role === 'DOCTOR' ? 'blue' : role === 'DETECTIVE' ? 'purple' : 'green'}-500
-              text-white`}
+            className={`w-full rounded-lg py-3 text-sm font-semibold text-white transition-colors ${cfg.button}`}
           >
             I understand my role
           </button>

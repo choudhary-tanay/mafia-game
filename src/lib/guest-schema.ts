@@ -8,13 +8,17 @@ type DbClient = SupabaseClient
 
 let cachedGuestColumns: boolean | null = null
 
+// true = columns exist; false = definitively missing (42703); null = probe
+// failed for some other reason (network blip, rate limit) — NOT definitive.
 async function canSelectColumns(
   supabase: DbClient,
   table: string,
   columns: string,
-): Promise<boolean> {
+): Promise<boolean | null> {
   const { error } = await supabase.from(table).select(columns).limit(1)
-  return !error
+  if (!error) return true
+  if (error.code === '42703' || /column .* does not exist/i.test(error.message ?? '')) return false
+  return null
 }
 
 export async function hasGuestPlayerColumns(supabase: DbClient): Promise<boolean> {
@@ -27,6 +31,12 @@ export async function hasGuestPlayerColumns(supabase: DbClient): Promise<boolean
     canSelectColumns(supabase, 'votes', 'voter_guest_id'),
     canSelectColumns(supabase, 'player_game_stats', 'guest_id,is_guest'),
   ])
+
+  // A transient probe failure must never pin this process in legacy mode —
+  // assume the migrated schema (the deployed reality) and re-probe next call.
+  if (checks.some((c) => c === null)) {
+    return !checks.includes(false)
+  }
 
   cachedGuestColumns = checks.every(Boolean)
   return cachedGuestColumns

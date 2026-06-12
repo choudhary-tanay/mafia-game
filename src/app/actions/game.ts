@@ -1,6 +1,7 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { revalidatePath } from 'next/cache'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getPlayerIdentity } from '@/lib/identity'
 import {
@@ -119,13 +120,27 @@ export async function startGame(roomCode: string): Promise<void> {
 
   const roles = buildRoleList(players.length, room.mafia_count)
 
+  // Claim the room atomically BEFORE creating the game. A concurrent second
+  // start (double-click, second tab) matches zero rows here and is bounced to
+  // the lobby, which forwards to the one game that was actually created.
+  const { data: roomClaim } = await supabase
+    .from('rooms')
+    .update({ status: 'ACTIVE' })
+    .eq('id', room.id)
+    .eq('status', 'LOBBY')
+    .select('id')
+  if (!roomClaim?.length) redirect(`/lobby/${roomCode}`)
+
   const { data: game, error: gameError } = await supabase
     .from('games')
     .insert({ room_id: room.id, status: 'ROLE_REVEAL', current_phase: 'ROLE_REVEAL', current_round_number: 0 })
     .select('id')
     .single()
 
-  if (gameError || !game) redirect(`/lobby/${roomCode}`)
+  if (gameError || !game) {
+    await supabase.from('rooms').update({ status: 'LOBBY' }).eq('id', room.id)
+    redirect(`/lobby/${roomCode}`)
+  }
 
   const { error: playersError } = await supabase.from('game_players').insert(
     players.map((p, i) => ({
@@ -146,12 +161,7 @@ export async function startGame(roomCode: string): Promise<void> {
 
   if (playersError) {
     await supabase.from('games').delete().eq('id', game.id)
-    redirect(`/lobby/${roomCode}`)
-  }
-
-  const { error: roomError } = await supabase.from('rooms').update({ status: 'ACTIVE' }).eq('id', room.id)
-  if (roomError) {
-    await supabase.from('games').delete().eq('id', game.id)
+    await supabase.from('rooms').update({ status: 'LOBBY' }).eq('id', room.id)
     redirect(`/lobby/${roomCode}`)
   }
 
@@ -197,17 +207,14 @@ export async function beginNight(gameId: string): Promise<void> {
     (identity.guestId && room?.host_guest_id === identity.guestId)
   if (!isHost) return
 
+  // Only valid from ROLE_REVEAL — a stale tab or double-click must not skip
+  // an in-progress day or restart the night.
+  if (game.current_phase !== 'ROLE_REVEAL') return
+
   const nextRound = game.current_round_number + 1
 
-  const { data: round } = await supabase
-    .from('rounds')
-    .insert({ game_id: gameId, round_number: nextRound, phase: 'NIGHT_ACTIONS_OPEN' })
-    .select('id')
-    .single()
-
-  if (!round) return
-
-  await supabase
+  // Atomic claim: zero rows updated means another request already advanced.
+  const { data: claim } = await supabase
     .from('games')
     .update({
       current_phase: 'NIGHT_ACTIONS_OPEN',
@@ -216,11 +223,23 @@ export async function beginNight(gameId: string): Promise<void> {
       phase_deadline: futureDeadline(room?.night_timer_seconds ?? 60),
     })
     .eq('id', gameId)
+    .eq('current_phase', 'ROLE_REVEAL')
+    .select('id')
+  if (!claim?.length) return
 
-  await addEvent(supabase, gameId, round.id, 'NIGHT_STARTED', 'PUBLIC', null,
-    `Night ${nextRound} has begun. The village falls asleep.`)
+  const { data: round } = await supabase
+    .from('rounds')
+    .insert({ game_id: gameId, round_number: nextRound, phase: 'NIGHT_ACTIONS_OPEN' })
+    .select('id')
+    .single()
+
+  if (round) {
+    await addEvent(supabase, gameId, round.id, 'NIGHT_STARTED', 'PUBLIC', null,
+      `Night ${nextRound} has begun. The village falls asleep.`)
+  }
 
   await broadcastGameUpdate(gameId, 'phase_changed', { phase: 'NIGHT_ACTIONS_OPEN' })
+  revalidatePath(`/game/${gameId}`)
 }
 
 // Submit night action (Mafia kill / Doctor save / Detective check)
@@ -279,31 +298,60 @@ export async function submitNightAction(
   if (!round) return { error: 'Round not found.' }
 
   const actorStableId = identity.userId ?? identity.guestId!
-  const conflictCol = identity.userId || !hasGuestColumns
-    ? 'round_id,actor_user_id,action_type'
-    : 'round_id,actor_guest_id,action_type'
+  // No upsert here: the partial unique indexes on night_actions cannot arbitrate
+  // a PostgREST ON CONFLICT (Postgres 42P10), so select-then-update/insert.
+  const actorCol = identity.userId || !hasGuestColumns ? 'actor_user_id' : 'actor_guest_id'
 
-  const { error: actionError } = await supabase.from('night_actions').upsert(
-    hasGuestColumns
-      ? {
-          game_id: gameId,
-          round_id: round.id,
-          actor_user_id:  identity.userId  ?? null,
-          actor_guest_id: identity.guestId ?? null,
-          action_type: actionType,
-          target_user_id: targetUserId,
-          submitted_at: new Date().toISOString(),
-        }
-      : {
-          game_id: gameId,
-          round_id: round.id,
-          actor_user_id: actorStableId,
-          action_type: actionType,
-          target_user_id: targetUserId,
-          submitted_at: new Date().toISOString(),
-        },
-    { onConflict: conflictCol },
-  )
+  const { data: existingAction } = await supabase
+    .from('night_actions')
+    .select('id')
+    .eq('round_id', round.id)
+    .eq('action_type', actionType)
+    .eq(actorCol, actorStableId)
+    .limit(1)
+    .maybeSingle()
+
+  let actionError = null
+  if (existingAction) {
+    const { error } = await supabase
+      .from('night_actions')
+      .update({ target_user_id: targetUserId, submitted_at: new Date().toISOString() })
+      .eq('id', existingAction.id)
+    actionError = error
+  } else {
+    const { error } = await supabase.from('night_actions').insert(
+      hasGuestColumns
+        ? {
+            game_id: gameId,
+            round_id: round.id,
+            actor_user_id:  identity.userId  ?? null,
+            actor_guest_id: identity.guestId ?? null,
+            action_type: actionType,
+            target_user_id: targetUserId,
+            submitted_at: new Date().toISOString(),
+          }
+        : {
+            game_id: gameId,
+            round_id: round.id,
+            actor_user_id: actorStableId,
+            action_type: actionType,
+            target_user_id: targetUserId,
+            submitted_at: new Date().toISOString(),
+          },
+    )
+    if (error?.code === '23505') {
+      // Lost a concurrent-insert race — update the row that won instead.
+      const { error: retryError } = await supabase
+        .from('night_actions')
+        .update({ target_user_id: targetUserId, submitted_at: new Date().toISOString() })
+        .eq('round_id', round.id)
+        .eq('action_type', actionType)
+        .eq(actorCol, actorStableId)
+      actionError = retryError
+    } else {
+      actionError = error
+    }
+  }
 
   if (actionError) return { error: 'Could not submit night action.' }
 
@@ -364,27 +412,55 @@ export async function submitVote(
   if (!round) return { error: 'Round not found.' }
 
   const voterStableId = identity.userId ?? identity.guestId!
-  const conflictCol = identity.userId || !hasGuestColumns ? 'round_id,voter_user_id' : 'round_id,voter_guest_id'
+  // No upsert here either — same partial-index/ON CONFLICT limitation as
+  // night_actions: select-then-update/insert.
+  const voterCol = identity.userId || !hasGuestColumns ? 'voter_user_id' : 'voter_guest_id'
 
-  const { error: voteError } = await supabase.from('votes').upsert(
-    hasGuestColumns
-      ? {
-          game_id: gameId,
-          round_id: round.id,
-          voter_user_id:  identity.userId  ?? null,
-          voter_guest_id: identity.guestId ?? null,
-          target_user_id: targetUserId,
-          submitted_at: new Date().toISOString(),
-        }
-      : {
-          game_id: gameId,
-          round_id: round.id,
-          voter_user_id: voterStableId,
-          target_user_id: targetUserId,
-          submitted_at: new Date().toISOString(),
-        },
-    { onConflict: conflictCol },
-  )
+  const { data: existingVote } = await supabase
+    .from('votes')
+    .select('id')
+    .eq('round_id', round.id)
+    .eq(voterCol, voterStableId)
+    .limit(1)
+    .maybeSingle()
+
+  let voteError = null
+  if (existingVote) {
+    const { error } = await supabase
+      .from('votes')
+      .update({ target_user_id: targetUserId, submitted_at: new Date().toISOString() })
+      .eq('id', existingVote.id)
+    voteError = error
+  } else {
+    const { error } = await supabase.from('votes').insert(
+      hasGuestColumns
+        ? {
+            game_id: gameId,
+            round_id: round.id,
+            voter_user_id:  identity.userId  ?? null,
+            voter_guest_id: identity.guestId ?? null,
+            target_user_id: targetUserId,
+            submitted_at: new Date().toISOString(),
+          }
+        : {
+            game_id: gameId,
+            round_id: round.id,
+            voter_user_id: voterStableId,
+            target_user_id: targetUserId,
+            submitted_at: new Date().toISOString(),
+          },
+    )
+    if (error?.code === '23505') {
+      const { error: retryError } = await supabase
+        .from('votes')
+        .update({ target_user_id: targetUserId, submitted_at: new Date().toISOString() })
+        .eq('round_id', round.id)
+        .eq(voterCol, voterStableId)
+      voteError = retryError
+    } else {
+      voteError = error
+    }
+  }
 
   if (voteError) return { error: 'Could not submit vote.' }
 
@@ -419,20 +495,72 @@ export async function maybeAdvancePhase(gameId: string): Promise<boolean> {
   const phase = game.current_phase
 
   if (phase === 'NIGHT_ACTIONS_OPEN') {
-    if (round) await resolveNight(supabase, gameId, round.id, hasGuestColumns)
+    if (round) {
+      await resolveNight(supabase, gameId, round.id, hasGuestColumns)
+      return true
+    }
+    // Recovery: phase advanced but the round row was never created (crash
+    // between the phase claim and the round insert). Create it and re-arm
+    // the deadline so players can actually act.
+    const { data: room } = await supabase
+      .from('rooms')
+      .select('night_timer_seconds')
+      .eq('id', game.room_id)
+      .single()
+    await supabase
+      .from('rounds')
+      .insert({ game_id: gameId, round_number: game.current_round_number, phase: 'NIGHT_ACTIONS_OPEN' })
+    await supabase
+      .from('games')
+      .update({ phase_deadline: futureDeadline(room?.night_timer_seconds ?? 60) })
+      .eq('id', gameId)
+      .eq('current_phase', 'NIGHT_ACTIONS_OPEN')
     return true
   }
+
+  // Recovery: resolveNight crashed after claiming NIGHT_RESOLUTION (its 20s
+  // safety deadline expired). Run the win check and finish the transition.
+  if (phase === 'NIGHT_RESOLUTION') {
+    const winner = await checkWinCondition(supabase, gameId)
+    if (winner) {
+      if (round) await endGame(supabase, gameId, round.id, winner)
+      return true
+    }
+    const { data: room } = await supabase
+      .from('rooms')
+      .select('discussion_timer_seconds')
+      .eq('id', game.room_id)
+      .single()
+    const { data: claim } = await supabase
+      .from('games')
+      .update({ current_phase: 'DISCUSSION', status: 'DISCUSSION', phase_deadline: futureDeadline(room?.discussion_timer_seconds ?? 180) })
+      .eq('id', gameId)
+      .eq('current_phase', 'NIGHT_RESOLUTION')
+      .select('id')
+    if (claim?.length) {
+      if (round) {
+        await addEvent(supabase, gameId, round.id, 'DISCUSSION_STARTED', 'PUBLIC', null,
+          'The village wakes up. Discussion has begun.')
+      }
+      await broadcastGameUpdate(gameId, 'phase_changed', { phase: 'DISCUSSION' })
+    }
+    return true
+  }
+
   if (phase === 'DISCUSSION') {
     const { data: room } = await supabase
       .from('rooms')
       .select('voting_timer_seconds')
       .eq('id', game.room_id)
       .single()
-    await supabase
+    // Atomic claim: zero rows updated = another request already advanced.
+    const { data: claim } = await supabase
       .from('games')
       .update({ current_phase: 'VOTING', status: 'VOTING', phase_deadline: futureDeadline(room?.voting_timer_seconds ?? 60) })
       .eq('id', gameId)
-      .eq('current_phase', 'DISCUSSION') // atomic guard
+      .eq('current_phase', 'DISCUSSION')
+      .select('id')
+    if (!claim?.length) return false
     if (round) {
       await addEvent(supabase, gameId, round.id, 'VOTING_STARTED', 'PUBLIC', null,
         'Voting has started. Cast your vote before time runs out.')
@@ -455,15 +583,9 @@ export async function maybeAdvancePhase(gameId: string): Promise<boolean> {
 
     const nextRound = game.current_round_number + 1
 
-    const { data: newRound, error: roundErr } = await supabase
-      .from('rounds')
-      .insert({ game_id: gameId, round_number: nextRound, phase: 'NIGHT_ACTIONS_OPEN' })
-      .select('id')
-      .single()
-
-    if (roundErr || !newRound) return false
-
-    const { error: advanceErr } = await supabase
+    // Claim the phase FIRST — only the winner inserts the new round, so
+    // concurrent pollers can never create duplicate rounds.
+    const { data: claim } = await supabase
       .from('games')
       .update({
         current_phase: 'NIGHT_ACTIONS_OPEN',
@@ -473,12 +595,20 @@ export async function maybeAdvancePhase(gameId: string): Promise<boolean> {
       })
       .eq('id', gameId)
       .eq('current_phase', 'VOTE_RESOLUTION')
+      .select('id')
+    if (!claim?.length) return false
 
-    if (!advanceErr && newRound) {
+    const { data: newRound } = await supabase
+      .from('rounds')
+      .insert({ game_id: gameId, round_number: nextRound, phase: 'NIGHT_ACTIONS_OPEN' })
+      .select('id')
+      .single()
+
+    if (newRound) {
       await addEvent(supabase, gameId, newRound.id, 'NIGHT_STARTED', 'PUBLIC', null,
         `Night ${nextRound} begins. The village falls asleep.`)
-      await broadcastGameUpdate(gameId, 'phase_changed', { phase: 'NIGHT_ACTIONS_OPEN' })
     }
+    await broadcastGameUpdate(gameId, 'phase_changed', { phase: 'NIGHT_ACTIONS_OPEN' })
     return true
   }
 
@@ -493,14 +623,17 @@ async function resolveNight(
   roundId: string,
   hasGuestColumns: boolean,
 ) {
-  // Atomic guard: only resolve once
-  const { error } = await supabase
+  // Atomic claim: a zero-row update returns NO error from supabase-js, so the
+  // only reliable race signal is the returned row count. The 20s deadline is a
+  // safety net — maybeAdvancePhase recovers if this invocation dies mid-way.
+  const { data: claim } = await supabase
     .from('games')
-    .update({ current_phase: 'NIGHT_RESOLUTION', status: 'NIGHT_RESOLUTION', phase_deadline: null })
+    .update({ current_phase: 'NIGHT_RESOLUTION', status: 'NIGHT_RESOLUTION', phase_deadline: futureDeadline(20) })
     .eq('id', gameId)
     .eq('current_phase', 'NIGHT_ACTIONS_OPEN')
+    .select('id')
 
-  if (error) return // already resolved by another request
+  if (!claim?.length) return // already resolved by another request
 
   // Fetch all night actions for this round
   const { data: actions } = await supabase
@@ -544,7 +677,9 @@ async function resolveNight(
         mafiaKillStory(name))
     }
   } else {
-    await addEvent(supabase, gameId, roundId, 'PLAYER_SAVED_BY_DOCTOR', 'PUBLIC', null,
+    // Distinct event type: PLAYER_SAVED_BY_DOCTOR is reserved for a real
+    // blocked kill — scoring counts doctor saves from it.
+    await addEvent(supabase, gameId, roundId, 'NIGHT_QUIET', 'PUBLIC', null,
       'The night passed quietly. No one was eliminated.')
   }
 
@@ -579,7 +714,8 @@ async function resolveNight(
     return
   }
 
-  // Advance to DAY_ANNOUNCEMENT
+  // Advance to DISCUSSION — guarded so a stale resolver can't regress an
+  // already-advanced game.
   const { data: room } = await supabase
     .from('rooms')
     .select('discussion_timer_seconds')
@@ -590,6 +726,7 @@ async function resolveNight(
     .from('games')
     .update({ current_phase: 'DISCUSSION', status: 'DISCUSSION', phase_deadline: futureDeadline(room?.discussion_timer_seconds ?? 180) })
     .eq('id', gameId)
+    .eq('current_phase', 'NIGHT_RESOLUTION')
 
   await addEvent(supabase, gameId, roundId, 'DISCUSSION_STARTED', 'PUBLIC', null,
     'The village wakes up. Discussion has begun.')
@@ -603,13 +740,17 @@ async function resolveVote(
   roundId: string,
   hasGuestColumns: boolean,
 ) {
-  const { error } = await supabase
+  // Atomic claim (rowcount check — see resolveNight). The 20s deadline lets
+  // maybeAdvancePhase recover if this invocation dies before the 5s window
+  // below is armed.
+  const { data: claim } = await supabase
     .from('games')
-    .update({ current_phase: 'VOTE_RESOLUTION', status: 'VOTE_RESOLUTION', phase_deadline: null })
+    .update({ current_phase: 'VOTE_RESOLUTION', status: 'VOTE_RESOLUTION', phase_deadline: futureDeadline(20) })
     .eq('id', gameId)
     .eq('current_phase', 'VOTING')
+    .select('id')
 
-  if (error) return
+  if (!claim?.length) return
 
   const { data: allVotes } = await supabase
     .from('votes')
@@ -660,6 +801,7 @@ async function resolveVote(
     .from('games')
     .update({ current_phase: 'VOTE_RESOLUTION', phase_deadline: futureDeadline(5) })
     .eq('id', gameId)
+    .eq('current_phase', 'VOTE_RESOLUTION')
 
   await broadcastGameUpdate(gameId, 'phase_changed', { phase: 'VOTE_RESOLUTION' })
 }
@@ -690,15 +832,10 @@ export async function beginNextNight(gameId: string): Promise<void> {
   if (!isHost) return
 
   const nextRound = game.current_round_number + 1
-  const { data: round } = await supabase
-    .from('rounds')
-    .insert({ game_id: gameId, round_number: nextRound, phase: 'NIGHT_ACTIONS_OPEN' })
-    .select('id')
-    .single()
 
-  if (!round) return
-
-  await supabase
+  // Claim the phase first — beats the race against maybeAdvancePhase's
+  // 5s auto-advance; only the winner inserts the round.
+  const { data: claim } = await supabase
     .from('games')
     .update({
       current_phase: 'NIGHT_ACTIONS_OPEN',
@@ -707,9 +844,23 @@ export async function beginNextNight(gameId: string): Promise<void> {
       phase_deadline: futureDeadline(room?.night_timer_seconds ?? 60),
     })
     .eq('id', gameId)
+    .eq('current_phase', 'VOTE_RESOLUTION')
+    .select('id')
+  if (!claim?.length) return
 
-  await addEvent(supabase, gameId, round.id, 'NIGHT_STARTED', 'PUBLIC', null,
-    `Night ${nextRound} begins. The village falls asleep again.`)
+  const { data: round } = await supabase
+    .from('rounds')
+    .insert({ game_id: gameId, round_number: nextRound, phase: 'NIGHT_ACTIONS_OPEN' })
+    .select('id')
+    .single()
+
+  if (round) {
+    await addEvent(supabase, gameId, round.id, 'NIGHT_STARTED', 'PUBLIC', null,
+      `Night ${nextRound} begins. The village falls asleep again.`)
+  }
+
+  await broadcastGameUpdate(gameId, 'phase_changed', { phase: 'NIGHT_ACTIONS_OPEN' })
+  revalidatePath(`/game/${gameId}`)
 }
 
 // ─── Host: end discussion early ───────────────────────────────────────────────
@@ -751,7 +902,8 @@ export async function endDiscussionEarly(
     .eq('round_number', game.current_round_number)
     .maybeSingle()
 
-  const { error } = await supabase
+  // Atomic claim (rowcount, not error — zero-row updates don't error)
+  const { data: claim } = await supabase
     .from('games')
     .update({
       current_phase: 'VOTING',
@@ -759,9 +911,10 @@ export async function endDiscussionEarly(
       phase_deadline: futureDeadline(room.voting_timer_seconds ?? 60),
     })
     .eq('id', gameId)
-    .eq('current_phase', 'DISCUSSION') // atomic guard
+    .eq('current_phase', 'DISCUSSION')
+    .select('id')
 
-  if (error) return { error: 'Could not end discussion.' }
+  if (!claim?.length) return { error: 'Discussion already ended.' }
 
   if (round) {
     await addEvent(supabase, gameId, round.id, 'VOTING_STARTED', 'PUBLIC', null,
@@ -769,6 +922,7 @@ export async function endDiscussionEarly(
   }
 
   await broadcastGameUpdate(gameId, 'phase_changed', { phase: 'VOTING' })
+  revalidatePath(`/game/${gameId}`)
   return {}
 }
 
@@ -790,6 +944,13 @@ async function endGame(
       phase_deadline: null,
     })
     .eq('id', gameId)
+
+  // Return the room to LOBBY so the same group can play again with the same
+  // code (players stay in room_players; the GAME_OVER screen links back).
+  const { data: g } = await supabase.from('games').select('room_id').eq('id', gameId).single()
+  if (g?.room_id) {
+    await supabase.from('rooms').update({ status: 'LOBBY' }).eq('id', g.room_id).eq('status', 'ACTIVE')
+  }
 
   const msg =
     winner === 'VILLAGE'

@@ -10,11 +10,11 @@ import {
   playerIdentityFilter,
   roomPlayerInsertPayload,
 } from '@/lib/guest-schema'
+import { leaveAllLobbyRooms, removeFromRoomWithPromotion } from '@/lib/room-membership'
 
 export type GuestActionState = {
   errors?: Record<string, string[]>
   generalError?: string
-  redirectTo?: string
 } | undefined
 
 export async function joinAsGuest(
@@ -52,7 +52,7 @@ export async function joinAsGuest(
       .eq('user_id', session.userId)
       .maybeSingle()
 
-    if (alreadyIn) return { redirectTo: `/lobby/${room.code}` }
+    if (alreadyIn) redirect(`/lobby/${room.code}`)
   } else if (guestSession?.guestId) {
     const { data: alreadyIn } = await supabase
       .from('room_players')
@@ -66,18 +66,20 @@ export async function joinAsGuest(
       }, hasGuestColumns))
       .maybeSingle()
 
-    if (alreadyIn) return { redirectTo: `/lobby/${room.code}` }
+    if (alreadyIn) redirect(`/lobby/${room.code}`)
   }
 
-  // Duplicate name check
-  const { data: existing } = await supabase
+  // Duplicate name check — fetch the room's names and compare in JS (an
+  // ilike() with user input would treat % and _ as wildcards).
+  const { data: nameRows } = await supabase
     .from('room_players')
-    .select('id')
+    .select('display_name')
     .eq('room_id', room.id)
-    .ilike('display_name', displayName)
-    .maybeSingle()
+  const nameTaken = (nameRows ?? []).some(
+    (r) => (r.display_name as string).toLowerCase() === displayName.toLowerCase(),
+  )
 
-  if (existing) return { generalError: 'Someone in this room is already using that name.' }
+  if (nameTaken) return { generalError: 'Someone in this room is already using that name.' }
 
   // If logged in, use the authenticated identity with the display name chosen for this room
   if (session?.userId) {
@@ -88,6 +90,11 @@ export async function joinAsGuest(
       .single()
 
     if (!user) redirect('/login')
+
+    // Clean exit from other lobbies (with host promotion) before joining.
+    await leaveAllLobbyRooms(supabase, {
+      userId: session.userId, guestId: null, isGuest: false, displayName: null,
+    })
 
     const { error } = await supabase.from('room_players').insert(
       roomPlayerInsertPayload({
@@ -101,11 +108,20 @@ export async function joinAsGuest(
     )
 
     if (error) return { generalError: 'Could not join room. Please try again.' }
-    return { redirectTo: `/lobby/${room.code}` }
+    redirect(`/lobby/${room.code}`)
   }
 
-  // Guest join
-  const guestId = crypto.randomUUID()
+  // Guest join — reuse the existing guest identity so the same person stays
+  // recognizable across rooms (a fresh UUID per join leaves ghost rows behind).
+  const guestId = guestSession?.guestId ?? crypto.randomUUID()
+
+  // Clean exit from other lobbies (with host promotion) before joining.
+  if (guestSession?.guestId) {
+    await leaveAllLobbyRooms(supabase, {
+      userId: null, guestId: guestSession.guestId, isGuest: true,
+      displayName: guestSession.displayName,
+    })
+  }
 
   if (!hasGuestColumns) {
     const compatibilityError = await ensureLegacyGuestUser(supabase, guestId, displayName)
@@ -127,7 +143,7 @@ export async function joinAsGuest(
   if (error) return { generalError: 'Could not join room. Please try again.' }
 
   await createGuestSession(guestId, displayName, room.id)
-  return { redirectTo: `/lobby/${room.code}` }
+  redirect(`/lobby/${room.code}`)
 }
 
 export async function leaveRoomAsGuest(roomCode: string): Promise<void> {
@@ -138,22 +154,18 @@ export async function leaveRoomAsGuest(roomCode: string): Promise<void> {
 
   const { data: room } = await supabase
     .from('rooms')
-    .select('id')
+    .select('id, host_user_id, host_guest_id')
     .eq('code', roomCode)
     .maybeSingle()
 
   if (room) {
-    const hasGuestColumns = await hasGuestPlayerColumns(supabase)
-    await supabase
-      .from('room_players')
-      .delete()
-      .eq('room_id', room.id)
-      .match(playerIdentityFilter({
-        userId: null,
-        guestId: guest.guestId,
-        isGuest: true,
-        displayName: guest.displayName,
-      }, hasGuestColumns))
+    // Same semantics as the authenticated leave: empty rooms are deleted and
+    // a departing guest host hands the room to the next player.
+    await removeFromRoomWithPromotion(
+      supabase,
+      room as { id: string; host_user_id: string | null; host_guest_id: string | null },
+      { userId: null, guestId: guest.guestId, isGuest: true, displayName: guest.displayName },
+    )
   }
 
   await deleteGuestSession()

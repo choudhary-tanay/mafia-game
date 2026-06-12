@@ -29,7 +29,9 @@ export default async function DashboardPage() {
     .eq('id', session.userId)
     .single()
 
-  if (error || !user) redirect('/login')
+  // Valid JWT but no users row (DB reset / deleted account): clear the cookie
+  // via /logout — redirecting straight to /login would bounce back here forever.
+  if (error || !user) redirect('/logout')
 
   const rank = getRank(user.total_score)
   const rankMeta = RANK_META[rank]

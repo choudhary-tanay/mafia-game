@@ -29,14 +29,8 @@ export async function getSession(): Promise<SessionPayload | null> {
   const token = cookieStore.get('session')?.value
   if (!token) return null
 
-  const session = await decrypt(token)
-
-  // Cookie exists but is invalid (stale, wrong key, expired) — clear it
-  // so the user isn't stuck in a redirect loop.
-  if (!session) {
-    cookieStore.delete('session')
-    return null
-  }
-
-  return session
+  // An invalid cookie is simply "not logged in" — deleting it here would
+  // throw during Server Component render (cookies can only be modified in
+  // Server Actions / Route Handlers). The /logout route clears stale cookies.
+  return decrypt(token)
 }

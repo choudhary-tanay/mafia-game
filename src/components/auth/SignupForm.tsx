@@ -31,6 +31,7 @@ export default function SignupForm() {
         type="text"
         autoComplete="name"
         placeholder="Your name"
+        defaultValue={state?.values?.fullName}
         error={state?.errors?.fullName?.[0]}
       />
 
@@ -40,13 +41,17 @@ export default function SignupForm() {
         type="email"
         autoComplete="email"
         placeholder="you@example.com"
+        defaultValue={state?.values?.email}
         error={state?.errors?.email?.[0]}
       />
 
+      {/* key remounts the select when the echoed value changes — a select's
+          defaultValue only applies at mount, unlike text inputs */}
       <Select
+        key={state?.values?.sex ?? 'unset'}
         label="Sex"
         name="sex"
-        defaultValue=""
+        defaultValue={state?.values?.sex ?? ''}
         placeholder="Select one…"
         options={SEX_OPTIONS}
         error={state?.errors?.sex?.[0]}

@@ -1,8 +1,7 @@
 'use client'
 
-import { useActionState, useEffect } from 'react'
+import { useActionState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { joinAsGuest, type GuestActionState } from '@/app/actions/guest'
 import Input from '@/components/ui/Input'
 import Button from '@/components/ui/Button'
@@ -14,15 +13,11 @@ export default function GuestJoinForm({
   roomCode?: string
   prefillName?: string
 }) {
-  const router = useRouter()
+  // On success the server action redirects (303) straight into the lobby.
   const [state, action, pending] = useActionState<GuestActionState, FormData>(
     joinAsGuest,
     undefined,
   )
-
-  useEffect(() => {
-    if (state?.redirectTo) router.replace(state.redirectTo)
-  }, [router, state?.redirectTo])
 
   return (
     <form action={action} className="flex flex-col gap-4">
@@ -56,7 +51,7 @@ export default function GuestJoinForm({
         error={state?.errors?.displayName?.[0]}
       />
 
-      <Button type="submit" loading={pending || !!state?.redirectTo} className="w-full py-3">
+      <Button type="submit" loading={pending} className="w-full py-3">
         Join game
       </Button>
 
