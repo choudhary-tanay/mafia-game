@@ -5,6 +5,7 @@ import { hasGuestPlayerColumns, playerIdentityFilter } from '@/lib/guest-schema'
 import GuestJoinForm from '@/components/join/GuestJoinForm'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { Users } from 'lucide-react'
 
 export async function generateMetadata({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params
@@ -15,7 +16,6 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
   const { code } = await params
   const upperCode = code.toUpperCase()
 
-  // Look up room info for display
   const supabase = createServiceClient()
   const { data: room } = await supabase
     .from('rooms')
@@ -23,7 +23,6 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
     .eq('code', upperCode)
     .maybeSingle()
 
-  // Prefill name if user is already logged in
   let prefillName = ''
   const session = await getSession()
   const guestSession = session?.userId ? null : await getGuestSession()
@@ -41,13 +40,16 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
   if (!room) {
     return (
       <main className="flex flex-1 items-center justify-center px-4">
-        <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-8 text-center animate-fade-up">
-          <p className="text-3xl mb-4">🚫</p>
-          <h1 className="text-xl font-bold text-text-primary mb-2">Room not found</h1>
-          <p className="text-sm text-text-muted mb-6">
-            This room does not exist or has expired.
+        <div className="w-full max-w-sm text-center animate-fade-up">
+          <div className="text-6xl mb-6">🚫</div>
+          <h1 className="text-2xl font-bold text-text-primary mb-3">Room not found</h1>
+          <p className="text-text-muted mb-8">
+            This room does not exist or has expired.<br />Check the code and try again.
           </p>
-          <Link href="/" className="text-sm text-accent hover:text-accent-hover">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface-raised px-6 py-3 text-sm font-semibold text-text-primary hover:bg-surface-high transition-all"
+          >
             ← Back to home
           </Link>
         </div>
@@ -58,13 +60,17 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
   if (room.status !== 'LOBBY') {
     return (
       <main className="flex flex-1 items-center justify-center px-4">
-        <div className="w-full max-w-sm rounded-2xl border border-border bg-surface p-8 text-center animate-fade-up">
-          <p className="text-3xl mb-4">⏱️</p>
-          <h1 className="text-xl font-bold text-text-primary mb-2">Game already started</h1>
-          <p className="text-sm text-text-muted mb-6">
-            Room <span className="font-mono font-bold text-accent">{upperCode}</span> is in progress.
+        <div className="w-full max-w-sm text-center animate-fade-up">
+          <div className="text-6xl mb-6">⏱️</div>
+          <h1 className="text-2xl font-bold text-text-primary mb-3">Game in progress</h1>
+          <p className="text-text-muted mb-2">
+            Room <span className="font-mono font-bold text-accent">{upperCode}</span> has already started.
           </p>
-          <Link href="/" className="text-sm text-accent hover:text-accent-hover">
+          <p className="text-text-muted text-sm mb-8">You can join the next game when this one ends.</p>
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface-raised px-6 py-3 text-sm font-semibold text-text-primary hover:bg-surface-high transition-all"
+          >
             ← Back to home
           </Link>
         </div>
@@ -80,7 +86,6 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
       .eq('room_id', room.id)
       .eq('user_id', session.userId)
       .maybeSingle()
-
     if (existing) redirect(`/lobby/${room.code}`)
   } else if (guestSession?.guestId) {
     const { data: existing } = await supabase
@@ -94,11 +99,9 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
         displayName: guestSession.displayName,
       }, hasGuestColumns))
       .maybeSingle()
-
     if (existing) redirect(`/lobby/${room.code}`)
   }
 
-  // Count players already in the room
   const { count } = await supabase
     .from('room_players')
     .select('*', { count: 'exact', head: true })
@@ -107,19 +110,27 @@ export default async function JoinPage({ params }: { params: Promise<{ code: str
   return (
     <main className="flex flex-1 items-center justify-center px-4 py-12">
       <div className="w-full max-w-md animate-fade-up">
-        <div className="mb-6 text-center">
-          <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl border border-accent/30 bg-accent/10 text-xl mb-4">
+        {/* Room header */}
+        <div className="text-center mb-8">
+          <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border border-accent/30 bg-accent/10 text-3xl mb-4 animate-glow-pulse">
             🎮
           </div>
-          <h1 className="text-2xl font-bold text-text-primary">Join the game</h1>
-          <p className="mt-1 text-sm text-text-muted">
-            Room <span className="font-mono font-bold text-accent">{upperCode}</span> ·{' '}
-            {count ?? 0} player{(count ?? 0) !== 1 ? 's' : ''} waiting
-          </p>
+          <h1 className="text-2xl font-bold text-text-primary">You&apos;ve been invited</h1>
+          <div className="mt-2 flex items-center justify-center gap-3">
+            <span className="rounded-xl border border-border bg-surface-raised px-4 py-1.5 font-mono text-lg font-bold tracking-widest text-accent">
+              {upperCode}
+            </span>
+          </div>
+          <div className="flex items-center justify-center gap-1.5 mt-3 text-sm text-text-muted">
+            <Users size={14} />
+            <span>{count ?? 0} player{(count ?? 0) !== 1 ? 's' : ''} waiting</span>
+          </div>
         </div>
-        <div className="rounded-2xl border border-border bg-surface p-7 shadow-2xl space-y-4">
-          <p className="text-sm text-text-muted text-center">
-            Enter your name to join. No account required.
+
+        {/* Join form */}
+        <div className="rounded-2xl border border-border bg-surface p-7 shadow-2xl">
+          <p className="text-center text-sm text-text-muted mb-5">
+            Enter your name to join the village. No account required.
           </p>
           <GuestJoinForm roomCode={upperCode} prefillName={prefillName} />
         </div>

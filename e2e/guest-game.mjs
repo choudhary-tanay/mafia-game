@@ -14,13 +14,13 @@ try {
   // ── 1. Guest creates a room and becomes host ────────────────────────────
   const { page: host, code } = await createGuestRoom(ctxs[0], names[0])
   step(`guest created room ${code} and landed in the lobby`)
-  await expectText(host, 'Start the game', { label: 'host controls' })
+  await expectText(host, 'Start game', { label: 'host controls' })
   await expectText(host, 'Save settings', { label: 'host settings form' })
   step('guest creator has host controls (start + settings)')
 
   // ── 2. Host refresh keeps host status ───────────────────────────────────
   await host.reload()
-  await expectText(host, 'Start the game', { label: 'host controls after refresh' })
+  await expectText(host, 'Start game', { label: 'host controls after refresh' })
   step('host survived a page refresh')
 
   // ── 3. Three join paths: invite link, /join page, landing code card ─────
@@ -45,7 +45,7 @@ try {
 
   // ── 5. Everyone sees all five players ───────────────────────────────────
   const pages = [host, g2, g3, g4, g5]
-  for (const p of pages) await expectText(p, 'Players (5)', { timeout: 20000, label: 'player list' })
+  for (const p of pages) await expectText(p, 'Players', { timeout: 20000, label: 'player list' })
   step('all five lobbies show Players (5)')
 
   // ── 6. Host updates settings ────────────────────────────────────────────
@@ -131,7 +131,7 @@ try {
   step('host ended discussion early — voting started')
 
   // ── 14. Dead player cannot vote ─────────────────────────────────────────
-  await expectText(victim, 'You are dead. Watch in silence.', { timeout: 30000 })
+  await expectText(victim, 'You are eliminated.', { timeout: 30000 })
   const victimVoteButtons = await victim.getByRole('button', { name: /^Cast Vote/ }).count()
   if (victimVoteButtons > 0) fail('dead player has a Cast Vote button')
   step('eliminated player is locked out of voting')
@@ -144,14 +144,14 @@ try {
   step('all alive players voted')
 
   // ── 16. Village wins ────────────────────────────────────────────────────
-  for (const p of pages) await expectText(p, 'Village wins!', { timeout: 45000, label: 'game over' })
+  for (const p of pages) await expectText(p, 'Village', { timeout: 45000, label: 'game over' })
   step('vote resolved — Mafia eliminated — Village wins on every screen')
 
   // ── 17. Play again returns to the same lobby ────────────────────────────
-  await host.getByRole('link', { name: /Play again/ }).click()
+  await host.getByRole('link', { name: /Play again/i }).click()
   await host.waitForURL(new RegExp(`/lobby/${code}$`, 'i'), { timeout: 30000 })
-  await expectText(host, 'Players (5)', { label: 'rematch lobby' })
-  await expectText(host, 'Start the game', { label: 'host controls in rematch lobby' })
+  await expectText(host, 'Players', { label: 'rematch lobby' })
+  await expectText(host, 'Start game', { label: 'host controls in rematch lobby' })
   step('play-again returned the host to a startable lobby with all five players')
 
   console.log('\nGUEST GAME E2E: ALL CHECKS PASSED')

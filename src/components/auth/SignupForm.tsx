@@ -1,11 +1,11 @@
 'use client'
 
 import { useActionState } from 'react'
-import Link from 'next/link'
 import { signup, type AuthState } from '@/app/actions/auth'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import Button from '@/components/ui/Button'
+import { UserPlus } from 'lucide-react'
 
 const SEX_OPTIONS = [
   { value: 'MALE', label: 'Male' },
@@ -20,9 +20,9 @@ export default function SignupForm() {
   return (
     <form action={action} className="flex flex-col gap-4">
       {state?.generalError && (
-        <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-          {state.generalError}
-        </p>
+        <div className="rounded-xl border border-red-700/40 bg-red-950/30 px-4 py-3 text-sm text-red-300">
+          ⚠ {state.generalError}
+        </div>
       )}
 
       <Input
@@ -45,8 +45,7 @@ export default function SignupForm() {
         error={state?.errors?.email?.[0]}
       />
 
-      {/* key remounts the select when the echoed value changes — a select's
-          defaultValue only applies at mount, unlike text inputs */}
+      {/* key remounts the select when the echoed value changes */}
       <Select
         key={state?.values?.sex ?? 'unset'}
         label="Sex"
@@ -75,16 +74,10 @@ export default function SignupForm() {
         error={state?.errors?.confirmPassword?.[0]}
       />
 
-      <Button type="submit" loading={pending} className="mt-2 w-full py-3">
+      <Button type="submit" loading={pending} className="mt-2 w-full py-3 text-base">
+        <UserPlus size={17} />
         Create account
       </Button>
-
-      <p className="text-center text-sm text-text-muted">
-        Already have an account?{' '}
-        <Link href="/login" className="text-accent hover:text-accent-hover transition-colors">
-          Sign in
-        </Link>
-      </p>
     </form>
   )
 }

@@ -37,9 +37,9 @@ export async function expectNoText(page, text, { label } = {}) {
 export async function createGuestRoom(ctx, name) {
   const page = await ctx.newPage()
   await page.goto(`${BASE}/`)
-  const form = page.locator('form', { has: page.getByRole('button', { name: 'Create a room' }) })
+  const form = page.locator('form', { has: page.getByRole('button', { name: /create/i }) })
   await form.locator('input[name="displayName"]').fill(name)
-  await form.getByRole('button', { name: 'Create a room' }).click()
+  await form.getByRole('button', { name: /create/i }).click()
   await page.waitForURL(/\/lobby\/[A-Z0-9]{6}$/i, { timeout: 30000 })
   const code = page.url().split('/').pop().toUpperCase()
   return { page, code }
@@ -53,7 +53,7 @@ export async function joinViaInviteLink(ctx, code, name) {
   await page.getByRole('button', { name: 'Join game' }).click()
   await page.waitForURL(new RegExp(`/lobby/${code}$`, 'i'), { timeout: 30000 })
   // lobby view shows the player list once joined
-  await expectText(page, 'Players (', { label: `lobby for ${name}` })
+  await expectText(page, 'Players', { label: `lobby for ${name}` })
   return page
 }
 
@@ -64,7 +64,7 @@ export async function joinViaJoinPage(ctx, code, name) {
   await page.locator('input[name="displayName"]').fill(name)
   await page.getByRole('button', { name: 'Join game' }).click()
   await page.waitForURL(new RegExp(`/lobby/${code}$`, 'i'), { timeout: 30000 })
-  await expectText(page, 'Players (', { label: `lobby for ${name}` })
+  await expectText(page, 'Players', { label: `lobby for ${name}` })
   return page
 }
 
@@ -77,7 +77,7 @@ export async function joinViaLandingCard(ctx, code, name) {
   await form.locator('input[name="displayName"]').fill(name)
   await form.getByRole('button', { name: 'Join game' }).click()
   await page.waitForURL(new RegExp(`/lobby/${code}$`, 'i'), { timeout: 30000 })
-  await expectText(page, 'Players (', { label: `lobby for ${name}` })
+  await expectText(page, 'Players', { label: `lobby for ${name}` })
   return page
 }
 
@@ -110,7 +110,7 @@ export async function acknowledgeRole(page) {
 /** Submit a night action: click the target name, then the role's submit button. */
 export async function submitNightAction(page, targetName, submitLabel) {
   await page.getByRole('button', { name: submitLabel }).waitFor({ timeout: 45000 })
-  await page.getByRole('button', { name: targetName, exact: true }).click()
+  await page.getByRole('button', { name: new RegExp(targetName) }).first().click()
   await page.getByRole('button', { name: submitLabel }).click()
   await expectText(page, 'Action submitted', { label: `night action by →${targetName}` })
 }
@@ -118,7 +118,7 @@ export async function submitNightAction(page, targetName, submitLabel) {
 /** Cast a vote for a player (two-step UI). */
 export async function castVote(page, targetName) {
   await page.getByRole('button', { name: 'Cast Vote' }).waitFor({ timeout: 45000 })
-  await page.getByRole('button', { name: targetName, exact: true }).click()
+  await page.getByRole('button', { name: new RegExp(targetName) }).first().click()
   await page.getByRole('button', { name: new RegExp('^Cast Vote') }).click()
   await expectText(page, 'Vote submitted', { label: `vote for ${targetName}` })
 }

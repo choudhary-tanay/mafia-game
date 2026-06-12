@@ -17,20 +17,15 @@ export default async function LobbyPage({ params }: { params: Promise<{ code: st
   const { code } = await params
   const upperCode = code.toUpperCase()
 
-  // Resolve identity — authenticated user or guest. User session takes
-  // precedence (matching getPlayerIdentity) so a leftover guest cookie can't
-  // make client-side host/leave checks disagree with the server.
+  // Resolve identity — user session takes precedence over guest cookie
   const [userSession, guestSession] = await Promise.all([getSession(), getGuestSession()])
+  const currentUserId  = userSession?.userId ?? null
+  const currentGuestId = currentUserId ? null : (guestSession?.guestId ?? null)
+  const hasAnyAuth     = !!(currentUserId || currentGuestId)
 
-  const currentUserId   = userSession?.userId ?? null
-  const currentGuestId  = currentUserId ? null : (guestSession?.guestId ?? null)
-  const hasAnyAuth      = !!(currentUserId || currentGuestId)
-
-  // No auth at all → redirect to the public join page
   if (!hasAnyAuth) redirect(`/join/${upperCode}`)
 
   const supabase = createServiceClient()
-
   const { data: room } = await supabase
     .from('rooms')
     .select('*')
@@ -38,16 +33,12 @@ export default async function LobbyPage({ params }: { params: Promise<{ code: st
     .maybeSingle()
 
   if (!room) notFound()
-
   const typedRoom = room as RoomRow
 
   if (typedRoom.status === 'ENDED') {
     redirect(currentUserId ? '/dashboard' : '/')
   }
 
-  // Active room → find the game and redirect there. If the game row isn't
-  // visible yet (start in progress), fall through and render the lobby — the
-  // 4s poll picks the game up moments later.
   if (typedRoom.status === 'ACTIVE') {
     const { data: activeGame } = await supabase
       .from('games')
@@ -56,11 +47,9 @@ export default async function LobbyPage({ params }: { params: Promise<{ code: st
       .order('started_at', { ascending: false })
       .limit(1)
       .maybeSingle()
-
     if (activeGame && activeGame.current_phase !== 'GAME_OVER') redirect(`/game/${activeGame.id}`)
   }
 
-  // Check if this player is already in the room
   const hasGuestColumns = await hasGuestPlayerColumns(supabase)
   let mySlot = null
   if (currentUserId) {
@@ -86,17 +75,20 @@ export default async function LobbyPage({ params }: { params: Promise<{ code: st
     mySlot = data
   }
 
-  // Not in the room → show a join form (invite link flow)
+  // Not in the room → show the join form
   if (!mySlot) {
     const prefillName = guestSession?.displayName ?? ''
     return (
       <main className="flex flex-1 items-center justify-center px-4 py-12">
         <div className="w-full max-w-md animate-fade-up">
-          <div className="mb-6 text-center">
+          <div className="mb-8 text-center">
+            <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border border-accent/30 bg-accent/10 text-3xl mb-4 animate-glow-pulse">
+              🎮
+            </div>
             <h1 className="text-2xl font-bold text-text-primary">
               Room <span className="font-mono text-accent">{upperCode}</span>
             </h1>
-            <p className="mt-1 text-sm text-text-muted">Enter your name to join</p>
+            <p className="mt-1 text-sm text-text-muted">Enter your name to join the village</p>
           </div>
           <div className="rounded-2xl border border-border bg-surface p-7 shadow-2xl">
             <GuestJoinForm roomCode={upperCode} prefillName={prefillName} />
@@ -106,7 +98,6 @@ export default async function LobbyPage({ params }: { params: Promise<{ code: st
     )
   }
 
-  // Player is in the room — show the full lobby
   const { data: players } = await supabase
     .from('room_players')
     .select('*')

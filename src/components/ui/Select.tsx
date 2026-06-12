@@ -11,33 +11,36 @@ export default function Select({ label, error, id, options, placeholder, classNa
   const selectId = id ?? label.toLowerCase().replace(/\s+/g, '-')
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={selectId} className="text-sm font-medium text-text-primary">
+      <label htmlFor={selectId} className="text-xs font-semibold uppercase tracking-wider text-text-muted">
         {label}
       </label>
       <select
         id={selectId}
         className={`
-          rounded-lg border border-border bg-surface-raised px-3 py-2.5 text-sm
+          rounded-xl border bg-surface-raised px-4 py-3 text-sm
           text-text-primary
-          focus:outline-none focus:border-accent/70 focus:ring-1 focus:ring-accent/40
-          disabled:opacity-50 transition-colors
-          ${error ? 'border-red-500/70 focus:border-red-500 focus:ring-red-500/30' : ''}
+          focus:outline-none focus:ring-1 transition-all
+          disabled:opacity-50
+          ${error
+            ? 'border-red-700/60 focus:border-red-600 focus:ring-red-700/30'
+            : 'border-border focus:border-border-bright focus:ring-border/50'
+          }
           ${className}
         `}
         {...props}
       >
         {placeholder && (
-          <option value="" disabled>
+          <option value="" disabled style={{ background: 'var(--surface-raised)', color: 'var(--text-faint)' }}>
             {placeholder}
           </option>
         )}
         {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
+          <option key={opt.value} value={opt.value} style={{ background: 'var(--surface-raised)', color: 'var(--text-primary)' }}>
             {opt.label}
           </option>
         ))}
       </select>
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {error && <p className="text-xs text-red-400 flex items-center gap-1">⚠ {error}</p>}
     </div>
   )
 }

@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { submitNightAction } from '@/app/actions/game'
 import type { Role, PublicPlayer } from '@/types/database'
-import Button from '@/components/ui/Button'
+import { Check, Loader2, Skull, Target } from 'lucide-react'
 
 type Props = {
   gameId: string
@@ -15,26 +15,64 @@ type Props = {
   mafiaCurrentTarget: string | null
 }
 
-const SUBMIT_LABEL: Record<string, string> = {
-  MAFIA:      'Submit Mafia Target',
-  DOCTOR:     'Submit Save',
-  DETECTIVE:  'Submit Investigation',
+const ROLE_CFG: Record<string, {
+  label: string
+  prompt: string
+  icon: string
+  bg: string
+  border: string
+  accentText: string
+  submitLabel: string
+}> = {
+  MAFIA: {
+    label: 'Mafia',
+    prompt: 'Choose a target to eliminate tonight.',
+    icon: '🔴',
+    bg: 'bg-red-950/30',
+    border: 'border-red-900/50',
+    accentText: 'text-red-400',
+    submitLabel: 'Submit Mafia Target',
+  },
+  DOCTOR: {
+    label: 'Doctor',
+    prompt: 'Choose one player to protect tonight.',
+    icon: '💊',
+    bg: 'bg-cyan-950/20',
+    border: 'border-cyan-900/40',
+    accentText: 'text-cyan-400',
+    submitLabel: 'Submit Save',
+  },
+  DETECTIVE: {
+    label: 'Detective',
+    prompt: 'Choose a player to investigate tonight.',
+    icon: '🔍',
+    bg: 'bg-purple-950/20',
+    border: 'border-purple-900/40',
+    accentText: 'text-purple-400',
+    submitLabel: 'Submit Investigation',
+  },
 }
 
-const PROMPT: Record<string, string> = {
-  MAFIA:     'Choose a player to eliminate tonight.',
-  DOCTOR:    'Choose a player to protect tonight.',
-  DETECTIVE: 'Choose a player to investigate tonight.',
-}
+const AVATAR_COLORS = [
+  'bg-red-900/50 text-red-300',
+  'bg-purple-900/50 text-purple-300',
+  'bg-cyan-900/50 text-cyan-300',
+  'bg-emerald-900/50 text-emerald-300',
+  'bg-amber-900/50 text-amber-300',
+  'bg-blue-900/50 text-blue-300',
+  'bg-pink-900/50 text-pink-300',
+  'bg-indigo-900/50 text-indigo-300',
+]
 
 export default function NightPanel({
   gameId, myRole, isAlive, players, currentUserId, submittedTargetId, mafiaCurrentTarget,
 }: Props) {
-  const [selected, setSelected]   = useState<string | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(submittedTargetId !== null)
-  const [error, setError]         = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
+  const cfg = ROLE_CFG[myRole]
   const alivePlayers = players.filter((p) => p.is_alive)
   const targets = myRole === 'MAFIA'
     ? alivePlayers.filter((p) => p.user_id !== currentUserId)
@@ -42,26 +80,38 @@ export default function NightPanel({
 
   if (!isAlive) {
     return (
-      <div className="rounded-xl border border-border bg-surface p-5 text-center text-sm text-text-muted">
-        You are dead. Watch in silence.
+      <div className="rounded-2xl border border-border bg-surface p-6 text-center">
+        <Skull size={24} className="mx-auto mb-3 text-text-faint" />
+        <p className="text-sm font-semibold text-text-muted">You are eliminated.</p>
+        <p className="text-xs text-text-faint mt-1">Watch and reflect on the night.</p>
       </div>
     )
   }
 
   if (myRole === 'VILLAGER') {
     return (
-      <div className="rounded-xl border border-border bg-surface p-5 text-center">
-        <p className="text-sm text-text-muted">You have no night action.</p>
-        <p className="mt-1 text-xs text-text-muted">Villagers wait for morning.</p>
+      <div className="rounded-2xl border border-border bg-surface p-6 text-center">
+        <p className="text-3xl mb-3">😴</p>
+        <p className="text-sm font-semibold text-text-primary">You have no night action.</p>
+        <p className="text-xs text-text-muted mt-1">Villagers wait for morning. Stay calm, stay hidden.</p>
       </div>
     )
   }
 
-  if (submitted) {
+  if (submitted || submittedTargetId !== null) {
+    const targetName = players.find((p) => p.user_id === (submittedTargetId ?? selected))?.display_name
     return (
-      <div className="rounded-xl border border-green-600/30 bg-green-950/20 p-5 text-center space-y-1">
-        <p className="text-sm font-semibold text-green-400">✓ Action submitted</p>
-        <p className="text-xs text-text-muted">Waiting for other night actions…</p>
+      <div className={`rounded-2xl border ${cfg.border} ${cfg.bg} p-6 text-center`}>
+        <div className="flex items-center justify-center gap-2 mb-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-900/40">
+            <Check size={20} className="text-emerald-400" />
+          </div>
+        </div>
+        <p className={`text-base font-bold mb-1 ${cfg.accentText}`}>Action submitted</p>
+        {targetName && (
+          <p className="text-sm text-text-muted">Target: <span className="font-semibold text-text-primary">{targetName}</span></p>
+        )}
+        <p className="text-xs text-text-faint mt-3">Waiting for other night actions…</p>
       </div>
     )
   }
@@ -69,7 +119,6 @@ export default function NightPanel({
   const actionType =
     myRole === 'MAFIA' ? 'MAFIA_KILL' : myRole === 'DOCTOR' ? 'DOCTOR_SAVE' : 'DETECTIVE_CHECK'
 
-  // Show current Mafia team target (for Mafia players)
   const teamTargetName = mafiaCurrentTarget
     ? (players.find((p) => p.user_id === mafiaCurrentTarget)?.display_name ?? 'Unknown')
     : null
@@ -87,51 +136,79 @@ export default function NightPanel({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-surface p-5 space-y-4">
-      {/* Prompt */}
-      <div>
-        <p className="text-sm font-medium text-text-primary">{PROMPT[myRole]}</p>
+    <div className={`rounded-2xl border ${cfg.border} ${cfg.bg} overflow-hidden`}>
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-border/50">
+        <div className="flex items-center gap-3">
+          <span className="text-2xl">{cfg.icon}</span>
+          <div>
+            <p className={`font-bold text-sm uppercase tracking-wider ${cfg.accentText}`}>{cfg.label}</p>
+            <p className="text-text-primary text-sm mt-0.5">{cfg.prompt}</p>
+          </div>
+        </div>
         {myRole === 'MAFIA' && teamTargetName && (
-          <p className="mt-1 text-xs text-text-muted">
-            Current team target: <span className="text-red-400 font-semibold">{teamTargetName}</span>
-          </p>
+          <div className="mt-3 flex items-center gap-2 rounded-lg bg-red-950/40 border border-red-900/40 px-3 py-2">
+            <Target size={13} className="text-red-400 flex-shrink-0" />
+            <p className="text-xs text-text-muted">
+              Team target: <span className="text-red-300 font-bold">{teamTargetName}</span>
+            </p>
+          </div>
         )}
       </div>
 
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {/* Target list */}
+      <div className="p-4">
+        {error && (
+          <p className="mb-3 rounded-lg border border-red-700/40 bg-red-950/30 px-3 py-2 text-xs text-red-400">
+            ⚠ {error}
+          </p>
+        )}
 
-      {/* Player list */}
-      <ul className="space-y-2">
-        {targets.map((p) => (
-          <li key={p.user_id}>
-            <button
-              onClick={() => { setSelected(p.user_id); setError(null) }}
-              disabled={isPending}
-              className={`w-full rounded-lg px-3 py-2.5 text-left text-sm transition-all ${
-                selected === p.user_id
-                  ? 'bg-accent text-white ring-2 ring-accent/50'
-                  : 'bg-surface-raised text-text-primary hover:bg-border'
-              }`}
-            >
-              {p.display_name}
-            </button>
-          </li>
-        ))}
-      </ul>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
+          {targets.map((p, i) => {
+            const isSelected = selected === p.user_id
+            const avatarColor = AVATAR_COLORS[i % AVATAR_COLORS.length]
+            return (
+              <button
+                key={p.user_id}
+                onClick={() => { setSelected(p.user_id); setError(null) }}
+                disabled={isPending}
+                className={`flex flex-col items-center gap-2 rounded-xl p-4 text-sm font-semibold transition-all border ${
+                  isSelected
+                    ? `${cfg.border} ${cfg.accentText} bg-surface-high ring-2 ring-current/30 scale-105`
+                    : 'border-border bg-surface-raised text-text-primary hover:bg-surface-high hover:border-border-bright hover:scale-102'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                <div className={`h-10 w-10 flex items-center justify-center rounded-full text-sm font-bold ${
+                  isSelected ? 'bg-current/20' : avatarColor
+                }`}>
+                  {p.display_name.charAt(0).toUpperCase()}
+                </div>
+                <span className="text-xs text-center leading-tight">{p.display_name}</span>
+                {isSelected && <Check size={12} className="opacity-80" />}
+              </button>
+            )
+          })}
+        </div>
 
-      {/* Submit */}
-      {!selected && (
-        <p className="text-center text-xs text-text-muted">Select a player to continue.</p>
-      )}
+        {!selected && (
+          <p className="text-center text-xs text-text-faint mb-3">
+            Select a player to continue.
+          </p>
+        )}
 
-      <Button
-        onClick={submit}
-        disabled={!selected || isPending}
-        loading={isPending}
-        className="w-full"
-      >
-        {SUBMIT_LABEL[myRole] ?? 'Submit'}
-      </Button>
+        <button
+          onClick={submit}
+          disabled={!selected || isPending}
+          className={`w-full flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold transition-all border ${
+            selected && !isPending
+              ? `${cfg.border} ${cfg.bg} ${cfg.accentText} hover:opacity-80`
+              : 'border-border bg-surface text-text-faint cursor-not-allowed opacity-50'
+          }`}
+        >
+          {isPending ? <><Loader2 size={15} className="animate-spin" /> Submitting…</> : cfg.submitLabel}
+        </button>
+      </div>
     </div>
   )
 }

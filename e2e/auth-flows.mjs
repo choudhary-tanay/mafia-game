@@ -49,11 +49,11 @@ try {
   await p1.locator('input[name="confirmPassword"]').fill(password)
   await p1.getByRole('button', { name: 'Create account' }).click()
   await p1.waitForURL(/\/dashboard$/, { timeout: 30000 })
-  await expectText(p1, 'Welcome back, E2E')
+  await expectText(p1, 'E2E Tester')
   step(`signup succeeded → redirected to dashboard (${email})`)
 
   await p1.reload()
-  await expectText(p1, 'Welcome back, E2E', { label: 'session after refresh' })
+  await expectText(p1, 'E2E Tester', { label: 'session after refresh' })
   step('signed-up user stays logged in after refresh')
 
   // ── Duplicate email blocked ───────────────────────────────────────────────
@@ -80,7 +80,7 @@ try {
   await expectText(p1, 'Start the game', { label: 'auth host after refresh' })
   step('auth host survives refresh')
 
-  await p1.getByRole('button', { name: 'Leave room' }).click()
+  await p1.getByRole('button', { name: /leave/i }).first().click()
   await p1.waitForURL(/\/dashboard$/, { timeout: 30000 })
   step('leave room returns the auth user to the dashboard')
 
@@ -113,11 +113,11 @@ try {
   await p3.locator('input[name="password"]').fill(password)
   await p3.getByRole('button', { name: 'Sign in' }).click()
   await p3.waitForURL(/\/dashboard$/, { timeout: 30000 })
-  await expectText(p3, 'Welcome back, E2E')
+  await expectText(p3, 'E2E Tester')
   step('valid login succeeds (email matched case-insensitively)')
 
   await p3.reload()
-  await expectText(p3, 'Welcome back, E2E', { label: 'login session after refresh' })
+  await expectText(p3, 'E2E Tester', { label: 'login session after refresh' })
   step('logged-in user stays authenticated after refresh')
 
   // Logged-in users are bounced away from /login and /signup
@@ -134,12 +134,12 @@ try {
   const ctx4 = await browser.newContext()
   const p4 = await ctx4.newPage()
   await p4.goto(`${BASE}/`)
-  const form = p4.locator('form', { has: p4.getByRole('button', { name: 'Create a room' }) })
+  const form = p4.locator('form', { has: p4.getByRole('button', { name: /create/i }) })
   await form.locator('input[name="displayName"]').fill('PostLogoutGuest')
-  await form.getByRole('button', { name: 'Create a room' }).click()
+  await form.getByRole('button', { name: /create/i }).click()
   await p4.waitForURL(/\/lobby\/[A-Z0-9]{6}$/i, { timeout: 30000 })
   step('guest room creation still works for logged-out users')
-  await p4.getByRole('button', { name: 'Leave room' }).click()
+  await p4.getByRole('button', { name: /leave/i }).first().click()
   await ctx4.close()
 
   console.log('\nAUTH FLOWS E2E: ALL CHECKS PASSED')
