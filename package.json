@@ -14,6 +14,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.108.1",
     "@types/bcryptjs": "^2.4.6",
+    "ably": "^2.22.1",
     "bcryptjs": "^3.0.3",
     "jose": "^6.2.3",
     "lucide-react": "^1.17.0",

@@ -11,6 +11,7 @@ import {
   roomPlayerInsertPayload,
 } from '@/lib/guest-schema'
 import { leaveAllLobbyRooms, removeFromRoomWithPromotion } from '@/lib/room-membership'
+import { broadcastLobbyState } from '@/lib/realtime'
 
 export type GuestActionState = {
   errors?: Record<string, string[]>
@@ -108,6 +109,7 @@ export async function joinAsGuest(
     )
 
     if (error) return { generalError: 'Could not join room. Please try again.' }
+    await broadcastLobbyState(room.code, 'PLAYER_JOINED')
     redirect(`/lobby/${room.code}`)
   }
 
@@ -143,6 +145,7 @@ export async function joinAsGuest(
   if (error) return { generalError: 'Could not join room. Please try again.' }
 
   await createGuestSession(guestId, displayName, room.id)
+  await broadcastLobbyState(room.code, 'PLAYER_JOINED')
   redirect(`/lobby/${room.code}`)
 }
 
@@ -168,6 +171,7 @@ export async function leaveRoomAsGuest(roomCode: string): Promise<void> {
     )
   }
 
+  await broadcastLobbyState(roomCode, 'PLAYER_LEFT')
   await deleteGuestSession()
   redirect('/')
 }

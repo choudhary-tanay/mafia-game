@@ -12,7 +12,7 @@ import {
 } from '@/lib/guest-schema'
 import { leaveAllLobbyRooms, removeFromRoomWithPromotion } from '@/lib/room-membership'
 import { joinRoomSchema, updateSettingsSchema } from '@/lib/validations'
-import { broadcastLobbyUpdate } from '@/lib/realtime'
+import { broadcastLobbyUpdate, broadcastLobbyState } from '@/lib/realtime'
 import { type GuestActionState } from '@/app/actions/guest'
 
 export type SavedSettings = {
@@ -291,6 +291,7 @@ export async function joinRoom(
 
   if (error) return { generalError: 'Could not join room. Please try again.' }
 
+  await broadcastLobbyState(room.code, 'PLAYER_JOINED')
   redirect(`/lobby/${room.code}`)
 }
 
@@ -315,6 +316,7 @@ export async function leaveRoom(roomCode: string): Promise<void> {
     identity,
   )
 
+  await broadcastLobbyState(roomCode, 'PLAYER_LEFT')
   redirect(identity.userId ? '/dashboard' : '/')
 }
 

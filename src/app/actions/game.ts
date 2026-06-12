@@ -14,7 +14,7 @@ import {
 } from '@/lib/guest-schema'
 import { validateLobby } from '@/lib/lobby'
 import { computeAndPersistScores } from '@/lib/scoring'
-import { broadcastGameUpdate } from '@/lib/realtime'
+import { broadcastGameUpdate, broadcastGameState } from '@/lib/realtime'
 import {
   buildRoleList,
   checkWinCondition,
@@ -359,7 +359,15 @@ export async function submitNightAction(
   if (actionError) return { error: 'Could not submit night action.' }
 
   const complete = await areNightActionsComplete(supabase, gameId, round.id, hasGuestColumns)
-  if (complete) await resolveNight(supabase, gameId, round.id, hasGuestColumns)
+  if (complete) {
+    // All required actions in — resolve immediately (broadcasts phase change).
+    await resolveNight(supabase, gameId, round.id, hasGuestColumns)
+  }
+  // SECURITY: deliberately NO broadcast on incomplete night submissions.
+  // Only special roles act at night, so a realtime "someone submitted" beacon
+  // would let players fingerprint who is non-villager by correlating event
+  // arrival with who touched their phone, and count alive special roles.
+  // Mafia-teammate target sync rides the 3s polling instead (≤3s lag).
 
   return {}
 }
@@ -471,7 +479,12 @@ export async function submitVote(
   if (voteError) return { error: 'Could not submit vote.' }
 
   const allIn = await areAllVotesIn(supabase, gameId, round.id)
-  if (allIn) await resolveVote(supabase, gameId, round.id, hasGuestColumns)
+  if (allIn) {
+    // All alive players voted — resolve immediately, no waiting for the timer.
+    await resolveVote(supabase, gameId, round.id, hasGuestColumns)
+  } else {
+    await broadcastGameState(gameId, 'VOTE_SUBMITTED')
+  }
 
   return {}
 }
@@ -656,7 +669,15 @@ export async function maybeAdvancePhase(gameId: string): Promise<boolean> {
   if (phase === 'NIGHT_RESOLUTION') {
     const winner = await checkWinCondition(supabase, gameId)
     if (winner) {
-      if (round) await endGame(supabase, gameId, round.id, winner)
+      // Claim before ending — concurrent pollers all reach this branch and an
+      // unguarded endGame would insert duplicate GAME_ENDED events.
+      const { data: winClaim } = await supabase
+        .from('games')
+        .update({ current_phase: 'GAME_OVER', status: 'GAME_OVER' })
+        .eq('id', gameId)
+        .eq('current_phase', 'NIGHT_RESOLUTION')
+        .select('id')
+      if (winClaim?.length && round) await endGame(supabase, gameId, round.id, winner)
       return true
     }
     const { data: room } = await supabase

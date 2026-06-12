@@ -56,7 +56,7 @@ try {
   step('guest badges shown; only the real host has settings + start controls')
 
   // ── 5. Host configures fast timers and starts ────────────────────────────
-  await host.locator('select[name="nightTimerSeconds"]').selectOption('30')
+  await host.locator('select[name="nightTimerSeconds"]').selectOption('60')
   await host.locator('select[name="votingTimerSeconds"]').selectOption('30')
   await host.locator('select[name="discussionTimerSeconds"]').selectOption('60')
   await host.getByRole('button', { name: 'Save settings' }).click()

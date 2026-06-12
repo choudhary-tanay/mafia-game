@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { beginNight, beginNextNight, endDiscussionEarly, pauseGame } from '@/app/actions/game'
-import { getBrowserClient } from '@/lib/supabase/client'
+import { useRealtimeSync, statusLabel } from '@/lib/useRealtimeSync'
 import AnnouncementFeed from './AnnouncementFeed'
 import CircularTimer from './CircularTimer'
 import PhaseBanner from './PhaseBanner'
@@ -144,18 +144,13 @@ export default function GameView(props: GameViewProps) {
   const [pausingGame, startPauseGame] = useTransition()
   const gameOver = phase === 'GAME_OVER'
 
-  // ── Realtime subscription ─────────────────────────────────────────────────
-  useEffect(() => {
-    if (gameOver) return
-    const supabase = getBrowserClient()
-    const channel = supabase
-      .channel(`game:${gameId}`)
-      .on('broadcast', { event: 'phase_changed' }, () => router.refresh())
-      .on('broadcast', { event: 'game_paused' },   () => router.refresh())
-      .on('broadcast', { event: 'game_resumed' },  () => router.refresh())
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [gameId, router, gameOver])
+  // ── Realtime subscription: Ably primary → Supabase backup → polling below.
+  //    The hook never throws; polling remains the guaranteed baseline. ───────
+  const syncStatus = useRealtimeSync({
+    channel: gameOver ? null : `game:${gameId}`,
+    events: ['game_state_updated', 'phase_changed', 'game_paused', 'game_resumed'],
+    onEvent: () => router.refresh(),
+  })
 
   // ── Polling fallback ──────────────────────────────────────────────────────
   // Slower while paused (resume must still arrive even if the realtime
@@ -228,6 +223,21 @@ export default function GameView(props: GameViewProps) {
             {roundNumber > 0 && (
               <span className="text-xs text-text-faint hidden sm:block">Round {roundNumber}</span>
             )}
+            {/* Connection status — subtle, desktop only (mobile relies on the dot color) */}
+            {!gameOver && (() => {
+              const s = statusLabel(syncStatus)
+              return (
+                <span
+                  className="flex items-center gap-1.5 text-[11px] text-text-faint"
+                  title={`Sync: ${s.label}`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${
+                    s.tone === 'ok' ? 'bg-emerald-400' : s.tone === 'warn' ? 'bg-amber-400 animate-pulse' : 'bg-text-faint'
+                  }`} />
+                  <span className="hidden md:block">{s.label}</span>
+                </span>
+              )
+            })()}
             {/* Hidden on mobile — the timer + full-screen overlay already show paused state */}
             {isPaused && (
               <span className="hidden sm:flex items-center gap-1 rounded-full border border-amber-700/50 bg-amber-950/30 px-2.5 py-1 text-[11px] font-bold text-amber-400 animate-pulse">

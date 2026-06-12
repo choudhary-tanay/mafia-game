@@ -8,7 +8,7 @@ import { validateLobby, recommendedMafiaCount, formatTimer } from '@/lib/lobby'
 import { leaveRoom, updateSettings, type SavedSettings } from '@/app/actions/room'
 import { leaveRoomAsGuest } from '@/app/actions/guest'
 import { startGame } from '@/app/actions/game'
-import { getBrowserClient } from '@/lib/supabase/client'
+import { useRealtimeSync } from '@/lib/useRealtimeSync'
 import Button from '@/components/ui/Button'
 import RulesButton from '@/components/rules/RulesModal'
 import HostBadge from '@/components/ui/HostBadge'
@@ -132,31 +132,51 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
     router.refresh()
   }, [settingsState, router])
 
-  // ── Realtime: keep non-host players in sync ─────────────────────────────────
-  useEffect(() => {
-    const supabase = getBrowserClient()
-    const channel = supabase
-      .channel(`lobby:${room.code}`)
-      .on('broadcast', { event: 'settings_updated' }, ({ payload }) => {
-        const s = payload as SavedSettings
-        // Apply the broadcast payload immediately so every player sees the
-        // new settings without needing a manual refresh.
+  // ── Realtime: keep all players in sync (Ably → Supabase backup) ────────────
+  // LobbyRefresh polling is the guaranteed baseline; the hook never throws.
+  // settings_updated carries the saved values so the form updates instantly;
+  // lobby_state_updated (join/leave) just triggers a refetch.
+  useRealtimeSync({
+    channel: `lobby:${room.code}`,
+    events: ['settings_updated', 'lobby_state_updated'],
+    onEvent: (event, payload) => {
+      if (event === 'settings_updated') {
+        const s = payload as SavedSettings | undefined
         if (s && typeof s.mafiaCount === 'number') {
           startTransition(() => setSettings(s))
         }
-        // Also refresh server data so the server component props stay in sync
-        // for subsequent renders (page reload, etc.).
-        router.refresh()
-      })
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [room.code, router])
+      }
+      router.refresh()
+    },
+  })
 
   // ── Copy invite ─────────────────────────────────────────────────────────────
+  // navigator.clipboard only exists in secure contexts (https / localhost) —
+  // players joining over a LAN IP (http://192.168.x.x:3000) need the fallback.
   async function copyInvite() {
-    await navigator.clipboard.writeText(inviteUrl)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 2000)
+    let ok = false
+    try {
+      await navigator.clipboard.writeText(inviteUrl)
+      ok = true
+    } catch {
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = inviteUrl
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        ok = document.execCommand('copy')
+        document.body.removeChild(ta)
+      } catch { /* leave ok=false */ }
+    }
+    if (ok) {
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } else {
+      // Last resort: show the URL so the host can copy it manually.
+      window.prompt('Copy the invite link:', inviteUrl)
+    }
   }
 
   return (

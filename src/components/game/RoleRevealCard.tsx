@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { beginNight } from '@/app/actions/game'
-import { getBrowserClient } from '@/lib/supabase/client'
+import { useRealtimeSync } from '@/lib/useRealtimeSync'
 import type { Role } from '@/types/database'
 import Button from '@/components/ui/Button'
 import { Play, Users, Lock } from 'lucide-react'
@@ -102,19 +102,20 @@ export default function RoleRevealCard({ role, mafiaTeammates, players, gameId, 
   const cfg = ROLE_CONFIG[role]
   const Art = cfg.Art
 
-  // Always poll/subscribe so the page swaps to GameView once Night 1 begins
+  // Polling — the guaranteed sync baseline so the page swaps to GameView once
+  // Night 1 begins. Kept in its OWN effect: it must keep running even if the
+  // realtime subscription below fails for any reason.
   useEffect(() => {
-    const supabase = getBrowserClient()
-    const channel = supabase
-      .channel(`game:${gameId}`)
-      .on('broadcast', { event: 'phase_changed' }, () => router.refresh())
-      .subscribe()
     const id = window.setInterval(() => router.refresh(), 3000)
-    return () => {
-      supabase.removeChannel(channel)
-      window.clearInterval(id)
-    }
-  }, [gameId, router])
+    return () => window.clearInterval(id)
+  }, [router])
+
+  // Realtime subscription (Ably → Supabase backup) — accelerator on top of polling.
+  useRealtimeSync({
+    channel: `game:${gameId}`,
+    events: ['phase_changed', 'game_state_updated'],
+    onEvent: () => router.refresh(),
+  })
 
   if (!acknowledged) {
     return (

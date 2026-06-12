@@ -108,27 +108,49 @@ export async function acknowledgeRole(page) {
   await page.getByRole('button', { name: 'I understand my role' }).click()
 }
 
-/** Submit a night action: click the target name, then the role's submit button. */
+/** Submit a night action: click the target name, then the role's submit button.
+ *  The submitter whose action COMPLETES the night triggers immediate
+ *  resolution — the page may swap to resolution/discussion before
+ *  "Action submitted" ever paints, so accept either outcome. */
 export async function submitNightAction(page, targetName, submitLabel) {
   await page.getByRole('button', { name: submitLabel }).waitFor({ timeout: 45000 })
   await page.getByRole('button', { name: new RegExp(targetName) }).first().click()
   await page.getByRole('button', { name: submitLabel }).click()
-  await expectText(page, 'Action submitted', { label: `night action by →${targetName}` })
+  try {
+    await page
+      .getByText(/Action submitted|Resolving night|Discussion|village wakes|Cast Vote/i)
+      .first()
+      .waitFor({ timeout: NAV_TIMEOUT })
+  } catch {
+    fail(`night action by →${targetName} — no submitted/advanced state on ${page.url()}`)
+  }
 }
+
+/** Vote outcome: the final voter triggers immediate resolution, so the
+ *  resolution / game-over view is as valid as the "Vote submitted" state. */
+const VOTE_OUTCOME = /Vote submitted|Votes tallied|most votes|Survives|Takes Control|Game Over/i
 
 /** Cast a vote for a player (two-step UI). */
 export async function castVote(page, targetName) {
   await page.getByRole('button', { name: 'Cast Vote' }).waitFor({ timeout: 45000 })
   await page.getByRole('button', { name: new RegExp(targetName) }).first().click()
   await page.getByRole('button', { name: new RegExp('^Cast Vote') }).click()
-  await expectText(page, 'Vote submitted', { label: `vote for ${targetName}` })
+  try {
+    await page.getByText(VOTE_OUTCOME).first().waitFor({ timeout: NAV_TIMEOUT })
+  } catch {
+    fail(`vote for ${targetName} — no submitted/resolved state on ${page.url()}`)
+  }
 }
 
 /** Abstain. */
 export async function abstain(page) {
   await page.getByRole('button', { name: 'Abstain' }).waitFor({ timeout: 45000 })
   await page.getByRole('button', { name: 'Abstain' }).click()
-  await expectText(page, 'Vote submitted', { label: 'abstain' })
+  try {
+    await page.getByText(VOTE_OUTCOME).first().waitFor({ timeout: NAV_TIMEOUT })
+  } catch {
+    fail(`abstain — no submitted/resolved state on ${page.url()}`)
+  }
 }
 
 /** Sign up a fresh account; resolves once the dashboard is shown. */

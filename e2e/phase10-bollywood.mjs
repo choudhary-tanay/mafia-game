@@ -18,8 +18,8 @@ try {
   step(`Normal mode: room ${code1} created`)
 
   // Set fast timers
-  await host1.locator('select[name="nightTimerSeconds"]').selectOption('30')
-  await host1.locator('select[name="votingTimerSeconds"]').selectOption('30')
+  await host1.locator('select[name="nightTimerSeconds"]').selectOption('60')
+  await host1.locator('select[name="votingTimerSeconds"]').selectOption('60')
   await host1.locator('select[name="discussionTimerSeconds"]').selectOption('60')
   await host1.getByRole('button', { name: 'Save settings' }).click()
   await expectText(host1, 'saved successfully', { label: 'settings saved', timeout: 8000 })
@@ -53,8 +53,8 @@ try {
   step(`Bollywood mode: room ${code2} created`)
 
   // Enable Bollywood mode
-  await host2.locator('select[name="nightTimerSeconds"]').selectOption('30')
-  await host2.locator('select[name="votingTimerSeconds"]').selectOption('30')
+  await host2.locator('select[name="nightTimerSeconds"]').selectOption('60')
+  await host2.locator('select[name="votingTimerSeconds"]').selectOption('60')
   await host2.locator('select[name="discussionTimerSeconds"]').selectOption('60')
   await host2.locator('input[name="bollywoodMode"]').check()
   const isModeChecked = await host2.locator('input[name="bollywoodMode"]').isChecked()
@@ -163,18 +163,23 @@ try {
     await host2.waitForTimeout(500)
   }
   await host2.getByRole('button', { name: 'End Discussion & Start Voting' }).click()
-  // Get "Cast Vote" from a live non-host player, not host who may be dead
-  let voteCheckPage = host2
-  for (const p of allGamePages) {
-    const isDead = await p.getByText('eliminated', { exact: false }).count() > 0
-    if (!isDead) { voteCheckPage = p; break }
+  // Find any page showing the voting form. Liveness can't be inferred from the
+  // word "eliminated" — the announcement feed shows elimination stories on
+  // EVERY page — so poll for the form itself (dead players see a watcher view).
+  let voteCheckPage = null
+  const voteDeadline = Date.now() + 45000
+  while (!voteCheckPage && Date.now() < voteDeadline) {
+    for (const p of allGamePages) {
+      if (await p.getByText('Cast Vote', { exact: false }).count() > 0) { voteCheckPage = p; break }
+    }
+    if (!voteCheckPage) await host2.waitForTimeout(1000)
   }
-  await expectText(voteCheckPage, 'Cast Vote', { timeout: 30000 })
+  if (!voteCheckPage) fail('no live player reached the voting form after end-discussion')
   step('Moved to voting phase')
 
   // All live players cast votes
   for (let i = 0; i < allGamePages.length; i++) {
-    const isDead = await allGamePages[i].getByText('eliminated', { exact: false }).count() > 0
+    const isDead = await allGamePages[i].getByText('You are eliminated', { exact: false }).count() > 0
     if (!isDead && roles[i] !== 'MAFIA') {
       await castVote(allGamePages[i], names2[mafiaIdx]).catch(() => {})
     } else if (!isDead) {

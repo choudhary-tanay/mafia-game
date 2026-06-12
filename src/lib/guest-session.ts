@@ -1,6 +1,7 @@
 import 'server-only'
 import { cookies } from 'next/headers'
 import { encryptGuest, decryptGuest, type GuestPayload } from '@/lib/jwt'
+import { isSecureRequest } from '@/lib/session'
 
 export type { GuestPayload }
 
@@ -13,7 +14,9 @@ export async function createGuestSession(
   const cookieStore = await cookies()
   cookieStore.set('guest_session', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    // Protocol-derived, NOT NODE_ENV — see isSecureRequest: a Secure cookie
+    // on http://192.168.x.x is silently dropped, breaking LAN guest play.
+    secure: await isSecureRequest(),
     maxAge: 60 * 60 * 24, // 24 hours
     sameSite: 'lax',
     path: '/',
