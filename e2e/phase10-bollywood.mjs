@@ -37,7 +37,7 @@ try {
   step('Non-host sees "Normal" game mode in settings panel ✓')
 
   // Play one night in Normal mode — no Bollywood popup should appear
-  await host1.getByRole('button', { name: 'Start game' }).click()
+  await host1.getByRole('button', { name: 'Start The Night' }).click()
   await host1.waitForURL(/\/game\//, { timeout: 30000 })
   await host1.locator('body').innerText()
   step('No Bollywood content visible in Normal mode game ✓')
@@ -85,7 +85,7 @@ try {
   step('Non-host sees "🎬 Bollywood" in settings panel ✓')
 
   // ── 3. Bollywood popup appears during game ────────────────────────────────
-  await host2.getByRole('button', { name: 'Start game' }).click()
+  await host2.getByRole('button', { name: 'Start The Night' }).click()
   const pages2 = [host2, p2b]
   await waitAllInGame(pages2)
   step('Game started in Bollywood mode')

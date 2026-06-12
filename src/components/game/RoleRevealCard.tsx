@@ -248,7 +248,7 @@ export default function RoleRevealCard({ role, mafiaTeammates, players, gameId, 
                 <form action={beginNight.bind(null, gameId)}>
                   <Button type="submit" className="px-8 py-3 min-h-[44px] font-bold text-base animate-breathe">
                     <Play size={16} />
-                    Start The Night
+                    Begin Night 1
                   </Button>
                 </form>
               </div>

@@ -315,7 +315,7 @@ export default function GameView(props: GameViewProps) {
                       <form action={beginNight.bind(null, gameId)}>
                         <Button type="submit" className="px-8 py-3 font-bold animate-breathe">
                           <Play size={16} />
-                          Start The Night
+                          Begin Night 1
                         </Button>
                       </form>
                     )}

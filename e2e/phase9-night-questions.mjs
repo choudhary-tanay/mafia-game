@@ -18,12 +18,12 @@ try {
   step(`room ${code} created`)
 
   // Set fast timers (30s night, 30s vote, 60s discussion) via settings form
-  await host.locator('select[name="nightTimerSeconds"]').selectOption('30')
+  await host.locator('select[name="nightTimerSeconds"]').selectOption('60')
   await host.locator('select[name="votingTimerSeconds"]').selectOption('30')
   await host.locator('select[name="discussionTimerSeconds"]').selectOption('60')
   await host.getByRole('button', { name: 'Save settings' }).click()
   await expectText(host, 'saved successfully', { label: 'settings saved', timeout: 10000 })
-  step('fast timers set (30s night, 30s vote, 60s discussion)')
+  step('fast timers set (60s night, 30s vote, 60s discussion)')
 
   const p2 = await joinViaInviteLink(ctxs[1], code, names[1])
   const p3 = await joinViaInviteLink(ctxs[2], code, names[2])
@@ -32,7 +32,7 @@ try {
   step('all 4 players in lobby')
 
   // ── 2. Start game ────────────────────────────────────────────────────────
-  await host.getByRole('button', { name: 'Start game' }).click()
+  await host.getByRole('button', { name: 'Start The Night' }).click()
   await waitAllInGame(pages)
   step('game started — all players in /game')
 

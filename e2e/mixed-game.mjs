@@ -30,7 +30,7 @@ try {
   const ctx2 = await browser.newContext()
   const p2 = await signup(ctx2, { fullName: names[1], email: emails[1], password })
   await p2.locator('input[name="code"]').fill(code)
-  await p2.getByRole('button', { name: 'Join room' }).click()
+  await p2.getByRole('button', { name: 'Join the village' }).click()
   await p2.waitForURL(new RegExp(`/lobby/${code}$`, 'i'), { timeout: 30000 })
   step('P2 (auth) joined with the room code')
 
@@ -43,15 +43,15 @@ try {
   step('P4 (guest) joined via landing-page code card')
 
   const pages = [host, p2, g3, g4]
-  for (const p of pages) await expectText(p, 'Players (4)', { timeout: 20000 })
-  step('all four lobbies show Players (4)')
+  for (const p of pages) await expectText(p, '4 gathered', { timeout: 20000 })
+  step('all four lobbies show 4 gathered')
 
   // ── 4. Badges + host-only permissions ────────────────────────────────────
   const guestBadges = await host.getByText('Guest', { exact: true }).count()
   if (guestBadges < 2) fail(`expected 2 Guest badges, saw ${guestBadges}`)
   await expectNoText(p2, 'Save settings', { label: 'non-host must not see the settings form' })
-  const p2Start = await p2.getByRole('button', { name: 'Start game' }).count()
-  if (p2Start > 0) fail('non-host sees a Start game button')
+  const p2Start = await p2.getByRole('button', { name: 'Start The Night' }).count()
+  if (p2Start > 0) fail('non-host sees a Start The Night button')
   await expectText(p2, 'Waiting for the host', { label: 'non-host waiting state' })
   step('guest badges shown; only the real host has settings + start controls')
 
@@ -60,8 +60,8 @@ try {
   await host.locator('select[name="votingTimerSeconds"]').selectOption('30')
   await host.locator('select[name="discussionTimerSeconds"]').selectOption('60')
   await host.getByRole('button', { name: 'Save settings' }).click()
-  await expectText(host, 'Settings saved')
-  await host.getByRole('button', { name: 'Start game' }).click()
+  await expectText(host, 'saved successfully')
+  await host.getByRole('button', { name: 'Start The Night' }).click()
   const gameId = await waitAllInGame(pages)
   step(`game ${gameId} started with 4 players`)
 

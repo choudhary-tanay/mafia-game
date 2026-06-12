@@ -45,7 +45,7 @@ try {
   step('All 4 players in lobby')
 
   // ── Start game ──────────────────────────────────────────────────────────────
-  await host.getByRole('button', { name: 'Start game' }).click()
+  await host.getByRole('button', { name: 'Start The Night' }).click()
   await waitAllInGame(players)
   step('Game started — all 4 players on game page')
 

@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "node e2e/run-all.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.1",

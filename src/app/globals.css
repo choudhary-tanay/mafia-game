@@ -250,10 +250,12 @@ input:-webkit-autofill:focus {
 
 /* ─── Phase 12: Cinematic UI foundation ─────────────────────────────────────── */
 
-/* Slow breathing glow — for "ready" CTAs (start game, resume) */
+/* Slow breathing glow — for "ready" CTAs (start game, resume).
+   Glow only, NO transform: an infinitely-moving button shifts the tap target
+   under the user's finger and never settles for automated clicks. */
 @keyframes breathe {
-  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); transform: scale(1); }
-  50%       { box-shadow: 0 0 28px 6px var(--accent-glow); transform: scale(1.015); }
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  50%       { box-shadow: 0 0 28px 6px var(--accent-glow); }
 }
 
 /* 3D card flip entrance — role reveal */

@@ -146,7 +146,7 @@ try {
   step('All 5 players in lobby')
 
   // ── Start game ─────────────────────────────────────────────────────────
-  await host.getByRole('button', { name: 'Start game' }).click()
+  await host.getByRole('button', { name: 'Start The Night' }).click()
   const allPages = [host, ...others]
   await waitAllInGame(allPages)
   step('Game started')

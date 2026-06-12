@@ -53,7 +53,7 @@ export async function joinViaInviteLink(ctx, code, name) {
   await page.getByRole('button', { name: 'Join game' }).click()
   await page.waitForURL(new RegExp(`/lobby/${code}$`, 'i'), { timeout: 30000 })
   // lobby view shows the player list once joined
-  await expectText(page, 'Players', { label: `lobby for ${name}` })
+  await expectText(page, 'The Village', { label: `lobby for ${name}` })
   return page
 }
 
@@ -64,7 +64,7 @@ export async function joinViaJoinPage(ctx, code, name) {
   await page.locator('input[name="displayName"]').fill(name)
   await page.getByRole('button', { name: 'Join game' }).click()
   await page.waitForURL(new RegExp(`/lobby/${code}$`, 'i'), { timeout: 30000 })
-  await expectText(page, 'Players', { label: `lobby for ${name}` })
+  await expectText(page, 'The Village', { label: `lobby for ${name}` })
   return page
 }
 
@@ -77,7 +77,7 @@ export async function joinViaLandingCard(ctx, code, name) {
   await form.locator('input[name="displayName"]').fill(name)
   await form.getByRole('button', { name: 'Join game' }).click()
   await page.waitForURL(new RegExp(`/lobby/${code}$`, 'i'), { timeout: 30000 })
-  await expectText(page, 'Players', { label: `lobby for ${name}` })
+  await expectText(page, 'The Village', { label: `lobby for ${name}` })
   return page
 }
 
@@ -139,7 +139,7 @@ export async function signup(ctx, { fullName, email, password }) {
   await page.locator('select[name="sex"]').selectOption('PREFER_NOT_TO_SAY')
   await page.locator('input[name="password"]').fill(password)
   await page.locator('input[name="confirmPassword"]').fill(password)
-  await page.getByRole('button', { name: 'Create account' }).click()
+  await page.getByRole('button', { name: 'Join the family' }).click()
   await page.waitForURL(/\/dashboard$/, { timeout: 30000 })
   return page
 }
@@ -150,7 +150,7 @@ export async function login(ctx, { email, password }) {
   await page.goto(`${BASE}/login`)
   await page.locator('input[name="email"]').fill(email)
   await page.locator('input[name="password"]').fill(password)
-  await page.getByRole('button', { name: 'Sign in' }).click()
+  await page.getByRole('button', { name: 'Enter the village' }).click()
   await page.waitForURL(/\/dashboard$/, { timeout: 30000 })
   return page
 }

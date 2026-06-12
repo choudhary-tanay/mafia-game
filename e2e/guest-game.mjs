@@ -14,13 +14,13 @@ try {
   // ── 1. Guest creates a room and becomes host ────────────────────────────
   const { page: host, code } = await createGuestRoom(ctxs[0], names[0])
   step(`guest created room ${code} and landed in the lobby`)
-  await expectText(host, 'Start game', { label: 'host controls' })
+  await expectText(host, 'Start The Night', { label: 'host controls' })
   await expectText(host, 'Save settings', { label: 'host settings form' })
   step('guest creator has host controls (start + settings)')
 
   // ── 2. Host refresh keeps host status ───────────────────────────────────
   await host.reload()
-  await expectText(host, 'Start game', { label: 'host controls after refresh' })
+  await expectText(host, 'Start The Night', { label: 'host controls after refresh' })
   step('host survived a page refresh')
 
   // ── 3. Three join paths: invite link, /join page, landing code card ─────
@@ -45,7 +45,7 @@ try {
 
   // ── 5. Everyone sees all five players ───────────────────────────────────
   const pages = [host, g2, g3, g4, g5]
-  for (const p of pages) await expectText(p, 'Players', { timeout: 20000, label: 'player list' })
+  for (const p of pages) await expectText(p, 'The Village', { timeout: 20000, label: 'player list' })
   step('all five lobbies show Players (5)')
 
   // ── 6. Host updates settings ────────────────────────────────────────────
@@ -53,14 +53,14 @@ try {
   await host.locator('select[name="votingTimerSeconds"]').selectOption('30')
   await host.locator('select[name="discussionTimerSeconds"]').selectOption('60')
   await host.getByRole('button', { name: 'Save settings' }).click()
-  await expectText(host, 'Settings saved', { label: 'settings saved flash' })
+  await expectText(host, 'saved successfully', { label: 'settings saved flash' })
   await host.reload()
   const nightVal = await host.locator('select[name="nightTimerSeconds"]').inputValue()
   if (nightVal !== '30') fail(`night timer not persisted (got ${nightVal})`)
   step('host saved settings (night 30s, voting 30s, discussion 60s) and they persist')
 
   // ── 7. Host starts the game; everyone is routed in ──────────────────────
-  await host.getByRole('button', { name: 'Start game' }).click()
+  await host.getByRole('button', { name: 'Start The Night' }).click()
   await waitAllInGame(pages)
   step('game started — all five players routed to /game')
 
@@ -150,8 +150,8 @@ try {
   // ── 17. Play again returns to the same lobby ────────────────────────────
   await host.getByRole('link', { name: /Play again/i }).click()
   await host.waitForURL(new RegExp(`/lobby/${code}$`, 'i'), { timeout: 30000 })
-  await expectText(host, 'Players', { label: 'rematch lobby' })
-  await expectText(host, 'Start game', { label: 'host controls in rematch lobby' })
+  await expectText(host, 'The Village', { label: 'rematch lobby' })
+  await expectText(host, 'Start The Night', { label: 'host controls in rematch lobby' })
   step('play-again returned the host to a startable lobby with all five players')
 
   console.log('\nGUEST GAME E2E: ALL CHECKS PASSED')
