@@ -110,7 +110,23 @@ export function computeBollywoodEvents(ctx: ComputeCtx): BollywoodEvent[] {
     (a) => a.event_type === 'PLAYER_KILLED_BY_MAFIA' || a.event_type === 'PLAYER_ELIMINATED_BY_VOTE',
   ).length
 
-  for (const ann of roundEvents) {
+  // Only process event types that are relevant to the CURRENT phase.
+  // This prevents night-kill events (stored in the same round) from being
+  // re-processed on VOTING/VOTE_RESOLUTION renders, which would change the
+  // dependency string and fire the GameView effect a second time.
+  const PHASE_ALLOWED_EVENTS: Record<string, string[]> = {
+    NIGHT_RESOLUTION:  ['PLAYER_KILLED_BY_MAFIA', 'PLAYER_SAVED_BY_DOCTOR', 'NIGHT_QUIET'],
+    DISCUSSION:        ['PLAYER_KILLED_BY_MAFIA', 'PLAYER_SAVED_BY_DOCTOR', 'NIGHT_QUIET'],
+    DAY_ANNOUNCEMENT:  ['PLAYER_KILLED_BY_MAFIA', 'PLAYER_SAVED_BY_DOCTOR', 'NIGHT_QUIET'],
+    VOTING:            ['PLAYER_KILLED_BY_MAFIA', 'PLAYER_SAVED_BY_DOCTOR', 'NIGHT_QUIET'],
+    VOTE_RESOLUTION:   ['PLAYER_ELIMINATED_BY_VOTE', 'NO_ELIMINATION_TIE', 'NO_ELIMINATION_ABSTAIN'],
+    GAME_OVER:         ['GAME_ENDED', 'PLAYER_ELIMINATED_BY_VOTE', 'NO_ELIMINATION_TIE', 'NO_ELIMINATION_ABSTAIN'],
+    NIGHT_ACTIONS_OPEN:['PLAYER_KILLED_BY_MAFIA', 'PLAYER_SAVED_BY_DOCTOR', 'NIGHT_QUIET'],
+  }
+  const allowedTypes = PHASE_ALLOWED_EVENTS[ctx.phase] ?? Object.values(PHASE_ALLOWED_EVENTS).flat()
+  const phaseScopedEvents = roundEvents.filter((a) => allowedTypes.includes(a.event_type))
+
+  for (const ann of phaseScopedEvents) {
     const targetPlayer = ann.target_player_id
       ? ctx.players.find((p) => p.user_id === ann.target_player_id)
       : null

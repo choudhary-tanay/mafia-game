@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { beginNight, beginNextNight, endDiscussionEarly } from '@/app/actions/game'
@@ -100,24 +100,22 @@ export default function GameView(props: GameViewProps) {
   const [nightQuestion] = useState(() => getRandomQuestion())
 
   // ── Bollywood reaction queue ─────────────────────────────────────────────
-  // Track seen event IDs in sessionStorage so the same popup never fires twice.
+  // A ref tracks seen event IDs so deduplication is synchronous and immune to
+  // React Strict Mode's double-effect invocation, concurrent scheduling, and
+  // the poll + realtime broadcast both firing within the same render window.
   const [reactionQueue, setReactionQueue] = useState<BollywoodEvent[]>([])
   const currentReaction = reactionQueue[0] ?? null
-  const [, startBwTransition] = useTransition()
+  const seenBwIds = useRef(new Set<string>())
 
   useEffect(() => {
     if (!bollywoodMode || bollywoodEvents.length === 0) return
-    // Use startTransition to avoid "setState in effect" cascade warnings.
-    startBwTransition(() => {
-      try {
-        const seen: string[] = JSON.parse(sessionStorage.getItem('bw-seen') ?? '[]')
-        const fresh = bollywoodEvents.filter((e) => !seen.includes(e.id))
-        if (fresh.length === 0) return
-        sessionStorage.setItem('bw-seen', JSON.stringify([...seen, ...fresh.map((e) => e.id)]))
-        setReactionQueue((q) => [...q, ...fresh])
-      } catch { /* sessionStorage unavailable */ }
-    })
-  // depend on the joined IDs string, not the array object, to avoid re-running on identity changes
+    // Synchronous check — ref reads/writes cannot race with each other.
+    const fresh = bollywoodEvents.filter((e) => !seenBwIds.current.has(e.id))
+    if (fresh.length === 0) return
+    fresh.forEach((e) => seenBwIds.current.add(e.id))
+    setReactionQueue((q) => [...q, ...fresh])
+  // depend on the joined IDs string so the effect only re-runs when the
+  // actual event set changes, not on every render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bollywoodMode, bollywoodEvents.map((e) => e.id).join(',')])
 

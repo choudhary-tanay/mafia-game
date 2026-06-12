@@ -13,14 +13,12 @@ export default function BollywoodReactionModal({ event, onClose }: Props) {
   const [imgError, setImgError] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Auto-close after durationMs (but don't start timer until image loads)
   function startAutoClose(delay: number) {
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = setTimeout(onClose, delay)
   }
 
   useEffect(() => {
-    // Start auto-close immediately; image load may re-start with full duration
     startAutoClose(event.durationMs)
     return () => { if (timerRef.current) clearTimeout(timerRef.current) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -78,15 +76,12 @@ export default function BollywoodReactionModal({ event, onClose }: Props) {
               onError={() => setImgError(true)}
               onLoad={() => startAutoClose(event.durationMs)}
               className="w-auto h-auto object-contain"
-              style={{
-                maxWidth: '100%',
-                maxHeight: '70vh',
-              }}
+              style={{ maxWidth: '100%', maxHeight: '70vh' }}
             />
           )}
         </div>
 
-        {/* Caption */}
+        {/* Caption + Continue */}
         <div className="w-full px-5 py-4 bg-gradient-to-t from-black/90 to-black/40 text-center flex-shrink-0">
           <p className="text-base sm:text-lg font-black text-white leading-snug tracking-wide drop-shadow">
             {event.caption}
