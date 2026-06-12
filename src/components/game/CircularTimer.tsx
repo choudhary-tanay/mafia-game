@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const R = 42
 const CIRC = 2 * Math.PI * R
@@ -13,11 +13,19 @@ function getRemainingSeconds(deadline: string | null, now: number): number | nul
 export default function CircularTimer({
   deadline,
   totalSeconds,
+  onExpire,
 }: {
   deadline: string | null
   totalSeconds: number
+  onExpire?: () => void
 }) {
   const [now, setNow] = useState(() => Date.now())
+  // Track whether onExpire has already fired for this deadline so we call it exactly once.
+  const expiredRef = useRef(false)
+
+  useEffect(() => {
+    expiredRef.current = false
+  }, [deadline])
 
   useEffect(() => {
     if (!deadline) return
@@ -26,6 +34,15 @@ export default function CircularTimer({
   }, [deadline])
 
   const secs = getRemainingSeconds(deadline, now)
+
+  // Fire onExpire exactly once when the timer first reaches 0.
+  useEffect(() => {
+    if (secs === 0 && !expiredRef.current && onExpire) {
+      expiredRef.current = true
+      onExpire()
+    }
+  }, [secs, onExpire])
+
   if (secs === null) return null
 
   const pct = totalSeconds > 0 ? Math.min(1, secs / totalSeconds) : 0
@@ -39,11 +56,15 @@ export default function CircularTimer({
   const s = secs % 60
   const label = m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${secs}`
 
+  // When the timer has hit 0, show a pulsing indicator instead of "0" so
+  // players know the phase is transitioning rather than the app being frozen.
+  const isExpired = secs === 0
+
   return (
     <div
       className="relative inline-flex items-center justify-center"
       style={{ width: 88, height: 88 }}
-      title={`${secs} seconds remaining`}
+      title={isExpired ? 'Moving to next phase…' : `${secs} seconds remaining`}
     >
       <svg
         width="88"
@@ -71,19 +92,35 @@ export default function CircularTimer({
         />
       </svg>
       <div className="relative z-10 text-center">
-        <span
-          className={`font-mono font-black tabular-nums leading-none ${
-            urgent ? 'text-red-400 animate-timer-urgent' : warning ? 'text-amber-400' : 'text-text-primary'
-          }`}
-          style={{ fontSize: secs >= 100 ? '16px' : '20px' }}
-        >
-          {label}
-        </span>
-        {m > 0 && (
-          <span className="block text-[8px] text-text-faint uppercase tracking-widest mt-0.5">min</span>
-        )}
-        {m === 0 && (
-          <span className="block text-[8px] text-text-faint uppercase tracking-widest mt-0.5">sec</span>
+        {isExpired ? (
+          <>
+            <span
+              className="font-mono font-black tabular-nums leading-none text-red-400 animate-pulse"
+              style={{ fontSize: '16px' }}
+            >
+              …
+            </span>
+            <span className="block text-[8px] text-text-faint uppercase tracking-widest mt-0.5">
+              next
+            </span>
+          </>
+        ) : (
+          <>
+            <span
+              className={`font-mono font-black tabular-nums leading-none ${
+                urgent ? 'text-red-400 animate-timer-urgent' : warning ? 'text-amber-400' : 'text-text-primary'
+              }`}
+              style={{ fontSize: secs >= 100 ? '16px' : '20px' }}
+            >
+              {label}
+            </span>
+            {m > 0 && (
+              <span className="block text-[8px] text-text-faint uppercase tracking-widest mt-0.5">min</span>
+            )}
+            {m === 0 && (
+              <span className="block text-[8px] text-text-faint uppercase tracking-widest mt-0.5">sec</span>
+            )}
+          </>
         )}
       </div>
     </div>

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { submitVote } from '@/app/actions/game'
 import type { PublicPlayer } from '@/types/database'
 import { Check, Skull, Loader2 } from 'lucide-react'
@@ -30,6 +31,7 @@ const AVATAR_COLORS = [
 export default function VotingPanel({
   gameId, isAlive, players, currentUserId, myVoteTargetId, voteCounts, phase,
 }: Props) {
+  const router = useRouter()
   const [pending, setPending] = useState<string | 'ABSTAIN' | null>(null)
   const [done, setDone] = useState(myVoteTargetId !== undefined)
   const [error, setError] = useState<string | null>(null)
@@ -106,6 +108,9 @@ export default function VotingPanel({
       const res = await submitVote(gameId, targetId)
       if (res.error) { setError(res.error); return }
       setDone(true)
+      // Refresh so this tab picks up the new phase immediately if all votes
+      // are in and voting just resolved (e.g. this was the last vote).
+      router.refresh()
     })
   }
 

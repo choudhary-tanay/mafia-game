@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { submitNightAction } from '@/app/actions/game'
 import type { Role, PublicPlayer } from '@/types/database'
 import type { NightQuestionAnswerRow } from '@/app/actions/night-question'
@@ -74,6 +75,7 @@ export default function NightPanel({
   gameId, myRole, isAlive, players, currentUserId, submittedTargetId, mafiaCurrentTarget,
   roundId, nightQuestion, myNightQuestionAnswer,
 }: Props) {
+  const router = useRouter()
   const [selected, setSelected] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(submittedTargetId !== null)
   const [error, setError] = useState<string | null>(null)
@@ -139,6 +141,9 @@ export default function NightPanel({
         setError(res.error)
       } else {
         setSubmitted(true)
+        // Refresh so this tab picks up the new phase if night resolved after
+        // this action (e.g. this was the last required action).
+        router.refresh()
       }
     })
   }

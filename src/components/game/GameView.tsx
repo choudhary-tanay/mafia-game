@@ -123,6 +123,7 @@ export default function GameView(props: GameViewProps) {
   const [endingDiscussion, startEndDiscussion] = useTransition()
   const gameOver = phase === 'GAME_OVER'
 
+  // ── Realtime subscription — listen for phase_changed from server ──────────
   useEffect(() => {
     if (gameOver) return
     const supabase = getBrowserClient()
@@ -133,10 +134,22 @@ export default function GameView(props: GameViewProps) {
     return () => { supabase.removeChannel(channel) }
   }, [gameId, router, gameOver])
 
+  // ── Polling fallback — catches missed broadcasts and timer drift ──────────
+  // 3 s interval: tight enough to feel responsive without hammering the server.
   useEffect(() => {
     if (gameOver) return
-    const id = setInterval(() => router.refresh(), 5000)
+    const id = setInterval(() => router.refresh(), 3000)
     return () => clearInterval(id)
+  }, [router, gameOver])
+
+  // ── Mobile / background-tab recovery — refresh immediately on focus ───────
+  useEffect(() => {
+    if (gameOver) return
+    const handler = () => {
+      if (document.visibilityState === 'visible') router.refresh()
+    }
+    document.addEventListener('visibilitychange', handler)
+    return () => document.removeEventListener('visibilitychange', handler)
   }, [router, gameOver])
 
   const phaseTotals: Partial<Record<GamePhase, number>> = {
@@ -182,7 +195,11 @@ export default function GameView(props: GameViewProps) {
           {/* Timer + rules */}
           <div className="flex items-center gap-3">
             <RulesButton />
-            <CircularTimer deadline={phaseDeadline} totalSeconds={totalSecs} />
+            <CircularTimer
+              deadline={phaseDeadline}
+              totalSeconds={totalSecs}
+              onExpire={() => router.refresh()}
+            />
           </div>
         </div>
       </header>
