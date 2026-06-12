@@ -42,6 +42,7 @@ export type RoomRow = {
   night_timer_seconds: number
   reveal_role_on_death: boolean
   tie_rule: TieRule
+  bollywood_mode: boolean | null  // Phase 10 — null until column is migrated (treated as false)
   created_at: string
   updated_at: string
 }

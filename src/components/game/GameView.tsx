@@ -10,10 +10,12 @@ import CircularTimer from './CircularTimer'
 import PhaseBanner from './PhaseBanner'
 import NightPanel from './NightPanel'
 import NightQuestionCard from './NightQuestionCard'
+import BollywoodReactionModal from './BollywoodReactionModal'
 import VotingPanel from './VotingPanel'
 import RulesButton from '@/components/rules/RulesModal'
 import type { Role, GamePhase, PublicPlayer, Announcement } from '@/types/database'
 import type { NightQuestionAnswerRow } from '@/app/actions/night-question'
+import type { BollywoodEvent } from '@/lib/bollywood-reactions'
 import { getRandomQuestion } from '@/lib/night-questions'
 import Button from '@/components/ui/Button'
 import { Skull, Play, ChevronRight, MessageCircle } from 'lucide-react'
@@ -45,6 +47,9 @@ export type GameViewProps = {
   roundId?: string | null
   myNightQuestionAnswer?: NightQuestionAnswerRow | null
   nightThoughts?: string[]
+  // Phase 10 — Bollywood Style
+  bollywoodMode?: boolean
+  bollywoodEvents?: BollywoodEvent[]
 }
 
 const ROLE_COLOR: Record<Role, string> = {
@@ -87,11 +92,34 @@ export default function GameView(props: GameViewProps) {
     announcements, detectiveResult, myNightActionTargetId,
     mafiaCurrentTarget, myVoteTargetId, voteCounts, timers,
     roundId, myNightQuestionAnswer, nightThoughts = [],
+    bollywoodMode = false, bollywoodEvents = [],
     isGuest = false,
   } = props
 
   // Stable random question for this session — only used if no stored answer exists
   const [nightQuestion] = useState(() => getRandomQuestion())
+
+  // ── Bollywood reaction queue ─────────────────────────────────────────────
+  // Track seen event IDs in sessionStorage so the same popup never fires twice.
+  const [reactionQueue, setReactionQueue] = useState<BollywoodEvent[]>([])
+  const currentReaction = reactionQueue[0] ?? null
+  const [, startBwTransition] = useTransition()
+
+  useEffect(() => {
+    if (!bollywoodMode || bollywoodEvents.length === 0) return
+    // Use startTransition to avoid "setState in effect" cascade warnings.
+    startBwTransition(() => {
+      try {
+        const seen: string[] = JSON.parse(sessionStorage.getItem('bw-seen') ?? '[]')
+        const fresh = bollywoodEvents.filter((e) => !seen.includes(e.id))
+        if (fresh.length === 0) return
+        sessionStorage.setItem('bw-seen', JSON.stringify([...seen, ...fresh.map((e) => e.id)]))
+        setReactionQueue((q) => [...q, ...fresh])
+      } catch { /* sessionStorage unavailable */ }
+    })
+  // depend on the joined IDs string, not the array object, to avoid re-running on identity changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bollywoodMode, bollywoodEvents.map((e) => e.id).join(',')])
 
   const router = useRouter()
   const [endingDiscussion, startEndDiscussion] = useTransition()
@@ -123,6 +151,14 @@ export default function GameView(props: GameViewProps) {
   const bgGradient = PHASE_BG[phase] ?? 'from-background to-background'
   return (
     <div className={`flex flex-1 flex-col min-h-0 bg-gradient-to-b ${bgGradient} transition-all duration-700`}>
+
+      {/* ── Bollywood reaction modal ─────────────────────────────────────────── */}
+      {currentReaction && (
+        <BollywoodReactionModal
+          event={currentReaction}
+          onClose={() => setReactionQueue((q) => q.slice(1))}
+        />
+      )}
 
       {/* ── Header ────────────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-20 border-b border-border bg-surface/90 backdrop-blur-sm px-4 py-3 flex-shrink-0">

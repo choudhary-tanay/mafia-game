@@ -70,6 +70,7 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
     votingTimerSeconds:     room.voting_timer_seconds,
     nightTimerSeconds:      room.night_timer_seconds,
     revealRoleOnDeath:      room.reveal_role_on_death,
+    bollywoodMode:          !!(room as { bollywood_mode?: boolean | null }).bollywood_mode,
   })
 
   const [, startTransition] = useTransition()
@@ -85,6 +86,7 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
         votingTimerSeconds:     room.voting_timer_seconds,
         nightTimerSeconds:      room.night_timer_seconds,
         revealRoleOnDeath:      room.reveal_role_on_death,
+        bollywoodMode:          !!(room as { bollywood_mode?: boolean | null }).bollywood_mode,
       })
     })
   }, [
@@ -411,6 +413,27 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
                       <span className="text-sm text-text-primary">Reveal role on death</span>
                     </label>
 
+                    {/* Bollywood Style Mode */}
+                    <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-transparent hover:bg-surface-raised transition-colors group">
+                      <input
+                        type="checkbox"
+                        name="bollywoodMode"
+                        checked={settings.bollywoodMode}
+                        onChange={(e) => setSettings((s) => ({ ...s, bollywoodMode: e.target.checked }))}
+                        className="h-4 w-4 mt-0.5 accent-accent rounded"
+                      />
+                      <div>
+                        <span className="text-sm text-text-primary font-medium flex items-center gap-1.5">
+                          🎬 Bollywood Style Mode
+                        </span>
+                        <p className="text-xs text-text-muted mt-0.5">
+                          {settings.bollywoodMode
+                            ? 'Meme popups enabled 🎉'
+                            : 'Show Bollywood meme reactions for key game events'}
+                        </p>
+                      </div>
+                    </label>
+
                     <div className="rounded-lg border border-border bg-surface-raised px-3 py-2.5">
                       <p className="text-xs text-text-muted">Tie rule</p>
                       <p className="text-sm text-text-primary font-medium">No elimination on tie</p>
@@ -436,6 +459,7 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
                     <SettingRow label="Voting" value={formatTimer(settings.votingTimerSeconds)} />
                     <SettingRow label="Night actions" value={formatTimer(settings.nightTimerSeconds)} />
                     <SettingRow label="Reveal on death" value={settings.revealRoleOnDeath ? 'Yes' : 'No'} />
+                    <SettingRow label="Game mode" value={settings.bollywoodMode ? '🎬 Bollywood' : 'Normal'} />
                     <SettingRow label="Tie rule" value="No elimination" />
                   </div>
                 )}

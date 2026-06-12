@@ -5,6 +5,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { gamePlayersSelect, hasGuestPlayerColumns } from '@/lib/guest-schema'
 import { maybeAdvancePhase } from '@/app/actions/game'
 import { getMyNightQuestionAnswer, getNightThoughts } from '@/app/actions/night-question'
+import { computeBollywoodEvents, type AnnExt } from '@/lib/bollywood-reactions'
 import RoleRevealCard from '@/components/game/RoleRevealCard'
 import GameView, { type GameViewProps } from '@/components/game/GameView'
 import type { GameRow, Role, PublicPlayer, Announcement } from '@/types/database'
@@ -57,7 +58,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
   // ── Room settings ─────────────────────────────────────────────────────────
   const { data: room } = await supabase
     .from('rooms')
-    .select('code, host_user_id, host_guest_id, reveal_role_on_death, night_timer_seconds, discussion_timer_seconds, voting_timer_seconds')
+    .select('code, host_user_id, host_guest_id, reveal_role_on_death, night_timer_seconds, discussion_timer_seconds, voting_timer_seconds, bollywood_mode')
     .eq('id', game.room_id)
     .single()
 
@@ -160,12 +161,14 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
   // ── Public announcements ──────────────────────────────────────────────────
   const { data: publicEvents } = await supabase
     .from('game_events')
-    .select('id, message, event_type, created_at')
+    .select('id, message, event_type, created_at, target_player_id, round_id')
     .eq('game_id', gameId)
     .eq('visibility', 'PUBLIC')
     .order('created_at', { ascending: true })
 
   const announcements: Announcement[] = (publicEvents ?? []) as Announcement[]
+  // Extended announcements (with target_player_id + round_id) used for Bollywood event computation
+  const annExt: AnnExt[] = (publicEvents ?? []) as unknown as AnnExt[]
 
   // ── Detective private result (only for Detective) ─────────────────────────
   let detectiveResult: string | null = null
@@ -241,6 +244,26 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
     }
   }
 
+  // ── Bollywood events for this player ─────────────────────────────────────
+  const bollywoodMode = !!(room as { bollywood_mode?: boolean | null } | null)?.bollywood_mode
+  const bollywoodEvents = bollywoodMode
+    ? computeBollywoodEvents({
+        roundId: round?.id ?? null,
+        roundNumber: game.current_round_number,
+        allAnnouncements: annExt,
+        myRole,
+        myIsAlive,
+        myStableId,
+        detectiveResult,
+        players,
+        voteCounts,
+        revealRoleOnDeath,
+        myNightActionTargetId,
+        winningTeam: game.winning_team,
+        phase: game.current_phase,
+      })
+    : []
+
   // ── Night Engagement: question answer + night thoughts ───────────────────
   let myNightQuestionAnswer = null
   let nightThoughts: string[] = []
@@ -293,6 +316,8 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
     voteCounts,
     revealRoleOnDeath,
     isGuest: !!currentGuestId,
+    bollywoodMode,
+    bollywoodEvents,
     roundId: round?.id ?? null,
     myNightQuestionAnswer,
     nightThoughts,

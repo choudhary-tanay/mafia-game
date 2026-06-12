@@ -21,6 +21,7 @@ export type SavedSettings = {
   votingTimerSeconds: number
   nightTimerSeconds: number
   revealRoleOnDeath: boolean
+  bollywoodMode: boolean
 }
 
 export type RoomActionState = {
@@ -339,6 +340,7 @@ export async function updateSettings(
   }
 
   const revealRoleOnDeath = formData.get('revealRoleOnDeath') === 'on'
+  const bollywoodMode = formData.get('bollywoodMode') === 'on'
   const supabase = createServiceClient()
 
   const { data: room } = await supabase
@@ -365,12 +367,17 @@ export async function updateSettings(
 
   if (error) return { generalError: 'Could not save settings.' }
 
+  // bollywood_mode is a separate update so it degrades gracefully when the
+  // column hasn't been migrated yet (the main settings still save successfully).
+  await supabase.from('rooms').update({ bollywood_mode: bollywoodMode }).eq('id', room.id)
+
   const savedValues: SavedSettings = {
     mafiaCount:             result.data.mafiaCount,
     discussionTimerSeconds: result.data.discussionTimerSeconds,
     votingTimerSeconds:     result.data.votingTimerSeconds,
     nightTimerSeconds:      result.data.nightTimerSeconds,
     revealRoleOnDeath,
+    bollywoodMode,
   }
 
   // Notify all lobby participants in real time so they see the new settings
