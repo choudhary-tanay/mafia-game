@@ -1,16 +1,15 @@
 'use client'
 
-import { useActionState, useEffect, useState } from 'react'
+import { useActionState, useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Copy, Check, LogOut, Play, Settings, Users, Crown, AlertTriangle } from 'lucide-react'
 import type { RoomRow, RoomPlayerRow } from '@/types/database'
 import { validateLobby, recommendedMafiaCount, formatTimer } from '@/lib/lobby'
-import { leaveRoom, updateSettings } from '@/app/actions/room'
+import { leaveRoom, updateSettings, type SavedSettings } from '@/app/actions/room'
 import { leaveRoomAsGuest } from '@/app/actions/guest'
 import { startGame } from '@/app/actions/game'
+import { getBrowserClient } from '@/lib/supabase/client'
 import Button from '@/components/ui/Button'
-import Input from '@/components/ui/Input'
-import Select from '@/components/ui/Select'
 import RulesButton from '@/components/rules/RulesModal'
 
 type Props = {
@@ -60,7 +59,43 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
     (currentGuestId &&
       ((p as RoomPlayerRow & { guest_id?: string | null }).guest_id === currentGuestId ||
         p.user_id === currentGuestId))
-  const validation = validateLobby(players.length, room.mafia_count)
+
+  // ── Controlled settings state ───────────────────────────────────────────────
+  // Using controlled state (not defaultValue) so the form always reflects the
+  // latest saved values — both after the host saves AND when a realtime event
+  // arrives from another host session.
+  const [settings, setSettings] = useState<SavedSettings>({
+    mafiaCount:             room.mafia_count,
+    discussionTimerSeconds: room.discussion_timer_seconds,
+    votingTimerSeconds:     room.voting_timer_seconds,
+    nightTimerSeconds:      room.night_timer_seconds,
+    revealRoleOnDeath:      room.reveal_role_on_death,
+  })
+
+  const [, startTransition] = useTransition()
+
+  // Sync local state if the server passes fresh room props (e.g. after router.refresh()).
+  // Wrapped in startTransition to satisfy React's concurrent-mode rules about
+  // state updates in effects.
+  useEffect(() => {
+    startTransition(() => {
+      setSettings({
+        mafiaCount:             room.mafia_count,
+        discussionTimerSeconds: room.discussion_timer_seconds,
+        votingTimerSeconds:     room.voting_timer_seconds,
+        nightTimerSeconds:      room.night_timer_seconds,
+        revealRoleOnDeath:      room.reveal_role_on_death,
+      })
+    })
+  }, [
+    room.mafia_count,
+    room.discussion_timer_seconds,
+    room.voting_timer_seconds,
+    room.night_timer_seconds,
+    room.reveal_role_on_death,
+  ])
+
+  const validation = validateLobby(players.length, settings.mafiaCount)
   const recommended = recommendedMafiaCount(players.length)
   const inviteUrl =
     typeof window !== 'undefined'
@@ -74,10 +109,41 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
   const [settingsState, settingsAction, settingsPending] = useActionState(updateSettings, undefined)
   const [copied, setCopied] = useState(false)
 
+  // ── React to successful save ────────────────────────────────────────────────
   useEffect(() => {
-    if (settingsState?.success) router.refresh()
+    if (!settingsState?.success) return
+    startTransition(() => {
+      // 1. Apply the saved values to local state immediately (no flicker, no stale form)
+      if (settingsState.savedValues) {
+        setSettings(settingsState.savedValues)
+      }
+    })
+    // 2. Refresh the server component so the authoritative room prop is also updated,
+    //    keeping things consistent after a page reload.
+    router.refresh()
   }, [settingsState, router])
 
+  // ── Realtime: keep non-host players in sync ─────────────────────────────────
+  useEffect(() => {
+    const supabase = getBrowserClient()
+    const channel = supabase
+      .channel(`lobby:${room.code}`)
+      .on('broadcast', { event: 'settings_updated' }, ({ payload }) => {
+        const s = payload as SavedSettings
+        // Apply the broadcast payload immediately so every player sees the
+        // new settings without needing a manual refresh.
+        if (s && typeof s.mafiaCount === 'number') {
+          startTransition(() => setSettings(s))
+        }
+        // Also refresh server data so the server component props stay in sync
+        // for subsequent renders (page reload, etc.).
+        router.refresh()
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [room.code, router])
+
+  // ── Copy invite ─────────────────────────────────────────────────────────────
   async function copyInvite() {
     await navigator.clipboard.writeText(inviteUrl)
     setCopied(true)
@@ -142,9 +208,7 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Users size={16} className="text-text-muted" />
-                  <span className="text-sm font-semibold text-text-primary">
-                    Players
-                  </span>
+                  <span className="text-sm font-semibold text-text-primary">Players</span>
                   <span className="rounded-full bg-surface-raised px-2 py-0.5 text-xs font-mono text-text-muted">
                     {players.length}
                   </span>
@@ -170,7 +234,6 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
                           : 'border-border bg-surface-raised hover:border-border-bright'
                       }`}
                     >
-                      {/* Host crown */}
                       {isPlayerHost && (
                         <div className="absolute -top-2.5 left-1/2 -translate-x-1/2">
                           <div className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 shadow-lg">
@@ -178,33 +241,19 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
                           </div>
                         </div>
                       )}
-
-                      {/* Avatar */}
                       <div className={`mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-full text-base font-bold ${avatarColor}`}>
                         {p.display_name.charAt(0).toUpperCase()}
                       </div>
-
-                      {/* Name */}
-                      <p className={`text-xs font-semibold truncate ${me ? 'text-text-primary' : 'text-text-primary'}`}>
-                        {p.display_name}
-                      </p>
-
-                      {/* Badges */}
+                      <p className="text-xs font-semibold truncate text-text-primary">{p.display_name}</p>
                       <div className="flex flex-wrap justify-center gap-1 mt-1.5">
-                        {me && (
-                          <span className="text-xs text-accent font-medium">(you)</span>
-                        )}
+                        {me && <span className="text-xs text-accent font-medium">(you)</span>}
                         {isGuest && !isPlayerHost && (
-                          <span className="rounded-full border border-text-faint/40 px-1.5 py-0.5 text-[10px] text-text-faint">
-                            Guest
-                          </span>
+                          <span className="rounded-full border border-text-faint/40 px-1.5 py-0.5 text-[10px] text-text-faint">Guest</span>
                         )}
                       </div>
                     </div>
                   )
                 })}
-
-                {/* Empty slots */}
                 {players.length < 4 && Array.from({ length: Math.max(0, 4 - players.length) }).map((_, i) => (
                   <div
                     key={`empty-${i}`}
@@ -235,11 +284,7 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
                     )}
                   </div>
                   <form action={startGameAction}>
-                    <Button
-                      type="submit"
-                      disabled={!validation.canStart}
-                      className="w-full py-3 text-base font-bold"
-                    >
+                    <Button type="submit" disabled={!validation.canStart} className="w-full py-3 text-base font-bold">
                       <Play size={17} />
                       Start game
                     </Button>
@@ -272,48 +317,95 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
                       <p className="text-xs text-red-400">⚠ {settingsState.generalError}</p>
                     )}
 
+                    {/* Mafia count — controlled */}
                     <div>
-                      <Input
-                        label="Mafia players"
+                      <label className="text-xs font-semibold uppercase tracking-wider text-text-muted block mb-1.5">
+                        Mafia players
+                      </label>
+                      <input
                         name="mafiaCount"
                         type="number"
                         min={1}
                         max={10}
-                        defaultValue={room.mafia_count}
-                        error={settingsState?.errors?.mafiaCount?.[0]}
-                        hint={`Recommended for ${players.length} players: ${recommended}`}
+                        value={settings.mafiaCount}
+                        onChange={(e) => setSettings((s) => ({ ...s, mafiaCount: Number(e.target.value) }))}
+                        className="w-full rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary focus:outline-none focus:border-border-bright focus:ring-1 focus:ring-border/50 transition-all"
                       />
+                      {settingsState?.errors?.mafiaCount?.[0] && (
+                        <p className="text-xs text-red-400 mt-1">⚠ {settingsState.errors.mafiaCount[0]}</p>
+                      )}
+                      <p className="text-xs text-text-faint mt-1">
+                        Recommended for {players.length} players: {recommended}
+                      </p>
                     </div>
 
-                    <Select
-                      label="Discussion timer"
-                      name="discussionTimerSeconds"
-                      defaultValue={String(room.discussion_timer_seconds)}
-                      options={DISCUSSION_OPTIONS}
-                      error={settingsState?.errors?.discussionTimerSeconds?.[0]}
-                    />
+                    {/* Discussion timer — controlled */}
+                    <div>
+                      <label className="text-xs font-semibold uppercase tracking-wider text-text-muted block mb-1.5">
+                        Discussion timer
+                      </label>
+                      <select
+                        name="discussionTimerSeconds"
+                        value={settings.discussionTimerSeconds}
+                        onChange={(e) => setSettings((s) => ({ ...s, discussionTimerSeconds: Number(e.target.value) }))}
+                        className="w-full rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary focus:outline-none focus:border-border-bright focus:ring-1 focus:ring-border/50 transition-all"
+                      >
+                        {DISCUSSION_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value} style={{ background: 'var(--surface-raised)' }}>{o.label}</option>
+                        ))}
+                      </select>
+                      {settingsState?.errors?.discussionTimerSeconds?.[0] && (
+                        <p className="text-xs text-red-400 mt-1">⚠ {settingsState.errors.discussionTimerSeconds[0]}</p>
+                      )}
+                    </div>
 
-                    <Select
-                      label="Voting timer"
-                      name="votingTimerSeconds"
-                      defaultValue={String(room.voting_timer_seconds)}
-                      options={VOTE_OPTIONS}
-                      error={settingsState?.errors?.votingTimerSeconds?.[0]}
-                    />
+                    {/* Voting timer — controlled */}
+                    <div>
+                      <label className="text-xs font-semibold uppercase tracking-wider text-text-muted block mb-1.5">
+                        Voting timer
+                      </label>
+                      <select
+                        name="votingTimerSeconds"
+                        value={settings.votingTimerSeconds}
+                        onChange={(e) => setSettings((s) => ({ ...s, votingTimerSeconds: Number(e.target.value) }))}
+                        className="w-full rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary focus:outline-none focus:border-border-bright focus:ring-1 focus:ring-border/50 transition-all"
+                      >
+                        {VOTE_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value} style={{ background: 'var(--surface-raised)' }}>{o.label}</option>
+                        ))}
+                      </select>
+                      {settingsState?.errors?.votingTimerSeconds?.[0] && (
+                        <p className="text-xs text-red-400 mt-1">⚠ {settingsState.errors.votingTimerSeconds[0]}</p>
+                      )}
+                    </div>
 
-                    <Select
-                      label="Night action timer"
-                      name="nightTimerSeconds"
-                      defaultValue={String(room.night_timer_seconds)}
-                      options={NIGHT_OPTIONS}
-                      error={settingsState?.errors?.nightTimerSeconds?.[0]}
-                    />
+                    {/* Night timer — controlled */}
+                    <div>
+                      <label className="text-xs font-semibold uppercase tracking-wider text-text-muted block mb-1.5">
+                        Night action timer
+                      </label>
+                      <select
+                        name="nightTimerSeconds"
+                        value={settings.nightTimerSeconds}
+                        onChange={(e) => setSettings((s) => ({ ...s, nightTimerSeconds: Number(e.target.value) }))}
+                        className="w-full rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary focus:outline-none focus:border-border-bright focus:ring-1 focus:ring-border/50 transition-all"
+                      >
+                        {NIGHT_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value} style={{ background: 'var(--surface-raised)' }}>{o.label}</option>
+                        ))}
+                      </select>
+                      {settingsState?.errors?.nightTimerSeconds?.[0] && (
+                        <p className="text-xs text-red-400 mt-1">⚠ {settingsState.errors.nightTimerSeconds[0]}</p>
+                      )}
+                    </div>
 
+                    {/* Reveal role on death — controlled */}
                     <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg hover:bg-surface-raised transition-colors">
                       <input
                         type="checkbox"
                         name="revealRoleOnDeath"
-                        defaultChecked={room.reveal_role_on_death}
+                        checked={settings.revealRoleOnDeath}
+                        onChange={(e) => setSettings((s) => ({ ...s, revealRoleOnDeath: e.target.checked }))}
                         className="h-4 w-4 accent-accent rounded"
                       />
                       <span className="text-sm text-text-primary">Reveal role on death</span>
@@ -329,18 +421,21 @@ export default function LobbyView({ room, players, currentUserId, currentGuestId
                     </Button>
 
                     {settingsState?.success && !settingsPending && (
-                      <p className="text-center text-xs text-emerald-400 flex items-center justify-center gap-1">
-                        <Check size={12} /> Settings saved
+                      <p className="text-center text-xs text-emerald-400 flex items-center justify-center gap-1.5">
+                        <Check size={13} />
+                        Room settings saved successfully.
                       </p>
                     )}
                   </form>
                 ) : (
+                  // Non-host: read-only view driven by the same `settings` state so
+                  // realtime updates are reflected here too without a page refresh.
                   <div className="space-y-2.5 text-sm">
-                    <SettingRow label="Mafia players" value={String(room.mafia_count)} />
-                    <SettingRow label="Discussion" value={formatTimer(room.discussion_timer_seconds)} />
-                    <SettingRow label="Voting" value={formatTimer(room.voting_timer_seconds)} />
-                    <SettingRow label="Night actions" value={formatTimer(room.night_timer_seconds)} />
-                    <SettingRow label="Reveal on death" value={room.reveal_role_on_death ? 'Yes' : 'No'} />
+                    <SettingRow label="Mafia players" value={String(settings.mafiaCount)} />
+                    <SettingRow label="Discussion" value={formatTimer(settings.discussionTimerSeconds)} />
+                    <SettingRow label="Voting" value={formatTimer(settings.votingTimerSeconds)} />
+                    <SettingRow label="Night actions" value={formatTimer(settings.nightTimerSeconds)} />
+                    <SettingRow label="Reveal on death" value={settings.revealRoleOnDeath ? 'Yes' : 'No'} />
                     <SettingRow label="Tie rule" value="No elimination" />
                   </div>
                 )}

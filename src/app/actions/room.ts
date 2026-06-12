@@ -12,12 +12,22 @@ import {
 } from '@/lib/guest-schema'
 import { leaveAllLobbyRooms, removeFromRoomWithPromotion } from '@/lib/room-membership'
 import { joinRoomSchema, updateSettingsSchema } from '@/lib/validations'
+import { broadcastLobbyUpdate } from '@/lib/realtime'
 import { type GuestActionState } from '@/app/actions/guest'
+
+export type SavedSettings = {
+  mafiaCount: number
+  discussionTimerSeconds: number
+  votingTimerSeconds: number
+  nightTimerSeconds: number
+  revealRoleOnDeath: boolean
+}
 
 export type RoomActionState = {
   errors?: Record<string, string[]>
   generalError?: string
   success?: boolean
+  savedValues?: SavedSettings
 } | undefined
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -354,5 +364,18 @@ export async function updateSettings(
     .eq('id', room.id)
 
   if (error) return { generalError: 'Could not save settings.' }
-  return { success: true }
+
+  const savedValues: SavedSettings = {
+    mafiaCount:             result.data.mafiaCount,
+    discussionTimerSeconds: result.data.discussionTimerSeconds,
+    votingTimerSeconds:     result.data.votingTimerSeconds,
+    nightTimerSeconds:      result.data.nightTimerSeconds,
+    revealRoleOnDeath,
+  }
+
+  // Notify all lobby participants in real time so they see the new settings
+  // without a manual refresh. Non-fatal if Supabase is unreachable.
+  await broadcastLobbyUpdate(roomCode, 'settings_updated', savedValues)
+
+  return { success: true, savedValues }
 }
