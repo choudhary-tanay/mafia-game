@@ -278,6 +278,6 @@ export function computeBollywoodEvents(ctx: ComputeCtx): BollywoodEvent[] {
     (a, b) => (BOLLYWOOD[a.key]?.priority ?? 9) - (BOLLYWOOD[b.key]?.priority ?? 9),
   )
 
-  // Max 2 popups per event cycle so we don't spam
-  return deduped.slice(0, 2)
+  // Max 1 popup per event cycle so only one meme is shown at a time
+  return deduped.slice(0, 1)
 }
