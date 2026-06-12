@@ -3,6 +3,7 @@
 import { chromium } from 'playwright'
 
 export const BASE = process.env.E2E_BASE_URL ?? 'http://localhost:3000'
+export const NAV_TIMEOUT = Number(process.env.E2E_NAV_TIMEOUT ?? 30000)
 
 export async function launch() {
   return chromium.launch({ headless: true })
@@ -20,7 +21,7 @@ export function fail(msg) {
   throw new Error(msg)
 }
 
-export async function expectText(page, text, { timeout = 30000, label } = {}) {
+export async function expectText(page, text, { timeout = NAV_TIMEOUT, label } = {}) {
   try {
     await page.getByText(text, { exact: false }).first().waitFor({ timeout })
   } catch {
@@ -40,7 +41,7 @@ export async function createGuestRoom(ctx, name) {
   const form = page.locator('form', { has: page.getByRole('button', { name: /create/i }) })
   await form.locator('input[name="displayName"]').fill(name)
   await form.getByRole('button', { name: /create/i }).click()
-  await page.waitForURL(/\/lobby\/[A-Z0-9]{6}$/i, { timeout: 30000 })
+  await page.waitForURL(/\/lobby\/[A-Z0-9]{6}$/i, { timeout: NAV_TIMEOUT })
   const code = page.url().split('/').pop().toUpperCase()
   return { page, code }
 }
@@ -51,7 +52,7 @@ export async function joinViaInviteLink(ctx, code, name) {
   await page.goto(`${BASE}/lobby/${code}`)
   await page.locator('input[name="displayName"]').fill(name)
   await page.getByRole('button', { name: 'Join game' }).click()
-  await page.waitForURL(new RegExp(`/lobby/${code}$`, 'i'), { timeout: 30000 })
+  await page.waitForURL(new RegExp(`/lobby/${code}$`, 'i'), { timeout: NAV_TIMEOUT })
   // lobby view shows the player list once joined
   await expectText(page, 'The Village', { label: `lobby for ${name}` })
   return page
@@ -63,7 +64,7 @@ export async function joinViaJoinPage(ctx, code, name) {
   await page.goto(`${BASE}/join/${code}`)
   await page.locator('input[name="displayName"]').fill(name)
   await page.getByRole('button', { name: 'Join game' }).click()
-  await page.waitForURL(new RegExp(`/lobby/${code}$`, 'i'), { timeout: 30000 })
+  await page.waitForURL(new RegExp(`/lobby/${code}$`, 'i'), { timeout: NAV_TIMEOUT })
   await expectText(page, 'The Village', { label: `lobby for ${name}` })
   return page
 }
@@ -76,7 +77,7 @@ export async function joinViaLandingCard(ctx, code, name) {
   await form.locator('input[name="code"]').fill(code)
   await form.locator('input[name="displayName"]').fill(name)
   await form.getByRole('button', { name: 'Join game' }).click()
-  await page.waitForURL(new RegExp(`/lobby/${code}$`, 'i'), { timeout: 30000 })
+  await page.waitForURL(new RegExp(`/lobby/${code}$`, 'i'), { timeout: NAV_TIMEOUT })
   await expectText(page, 'The Village', { label: `lobby for ${name}` })
   return page
 }
@@ -93,7 +94,7 @@ export async function waitAllInGame(pages, { timeout = 45000 } = {}) {
 
 /** Read the role shown on the role-reveal card. */
 export async function readRole(page) {
-  await page.getByText('Your secret role').waitFor({ timeout: 30000 })
+  await page.getByText('Your secret role').waitFor({ timeout: NAV_TIMEOUT })
   const heading = page.locator('h1')
   const label = (await heading.first().textContent())?.trim()
   const map = { Mafia: 'MAFIA', Doctor: 'DOCTOR', Detective: 'DETECTIVE', Villager: 'VILLAGER' }
@@ -140,7 +141,7 @@ export async function signup(ctx, { fullName, email, password }) {
   await page.locator('input[name="password"]').fill(password)
   await page.locator('input[name="confirmPassword"]').fill(password)
   await page.getByRole('button', { name: 'Join the family' }).click()
-  await page.waitForURL(/\/dashboard$/, { timeout: 30000 })
+  await page.waitForURL(/\/dashboard$/, { timeout: NAV_TIMEOUT })
   return page
 }
 
@@ -151,6 +152,6 @@ export async function login(ctx, { email, password }) {
   await page.locator('input[name="email"]').fill(email)
   await page.locator('input[name="password"]').fill(password)
   await page.getByRole('button', { name: 'Enter the village' }).click()
-  await page.waitForURL(/\/dashboard$/, { timeout: 30000 })
+  await page.waitForURL(/\/dashboard$/, { timeout: NAV_TIMEOUT })
   return page
 }

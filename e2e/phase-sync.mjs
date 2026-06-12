@@ -17,7 +17,7 @@ import {
   waitAllInGame, readRole, acknowledgeRole, submitNightAction, castVote,
 } from './helpers.mjs'
 
-const SYNC_TIMEOUT = 20000 // generous — broadcast + 3 s poll should be well under this
+const SYNC_TIMEOUT = Number(process.env.E2E_SYNC_TIMEOUT ?? 20000) // generous — broadcast + 3 s poll should be well under this
 
 const browser = await launch()
 
