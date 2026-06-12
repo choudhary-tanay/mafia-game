@@ -1,7 +1,13 @@
+import type { ReactNode } from 'react'
 import type { GamePhase } from '@/types/database'
+import { Sunrise } from 'lucide-react'
+import {
+  MoonScene, HourglassIcon, VillagerGroup,
+  BallotBox, SkullMark, TrophyIcon,
+} from '@/components/ui/illustrations'
 
 type PhaseCfg = {
-  icon: string
+  icon: ReactNode
   title: string
   subtitle: string
   border: string
@@ -11,15 +17,15 @@ type PhaseCfg = {
 
 const CFG: Partial<Record<GamePhase, PhaseCfg>> = {
   NIGHT_ACTIONS_OPEN: {
-    icon: '🌙',
+    icon: <MoonScene size={40} className="text-blue-300 animate-float" />,
     title: 'Night Falls',
-    subtitle: 'The village sleeps. Hidden roles, make your move.',
+    subtitle: 'The village sleeps. Hidden roles make their move.',
     border: 'border-blue-800/50',
     bg: 'bg-gradient-to-r from-blue-950/40 to-indigo-950/30',
     accentColor: 'text-blue-300',
   },
   NIGHT_RESOLUTION: {
-    icon: '⚙️',
+    icon: <HourglassIcon size={36} className="text-blue-400 animate-float" />,
     title: 'Resolving Night…',
     subtitle: 'The darkness holds its secrets for just a moment longer.',
     border: 'border-blue-800/40',
@@ -27,7 +33,7 @@ const CFG: Partial<Record<GamePhase, PhaseCfg>> = {
     accentColor: 'text-blue-400',
   },
   DAY_ANNOUNCEMENT: {
-    icon: '☀️',
+    icon: <Sunrise size={36} strokeWidth={1.75} className="text-amber-300" />,
     title: 'Morning Arrives',
     subtitle: 'The village stirs. What happened in the night?',
     border: 'border-amber-700/40',
@@ -35,7 +41,7 @@ const CFG: Partial<Record<GamePhase, PhaseCfg>> = {
     accentColor: 'text-amber-300',
   },
   DISCUSSION: {
-    icon: '💬',
+    icon: <VillagerGroup size={40} className="text-amber-300" />,
     title: 'Discussion',
     subtitle: 'Debate, accuse, defend. Find the Mafia before they strike again.',
     border: 'border-amber-700/40',
@@ -43,7 +49,7 @@ const CFG: Partial<Record<GamePhase, PhaseCfg>> = {
     accentColor: 'text-amber-300',
   },
   VOTING: {
-    icon: '🗳️',
+    icon: <BallotBox size={40} className="text-red-300" />,
     title: 'Cast Your Vote',
     subtitle: 'Choose carefully. The village will act on your decision.',
     border: 'border-red-800/50',
@@ -51,7 +57,7 @@ const CFG: Partial<Record<GamePhase, PhaseCfg>> = {
     accentColor: 'text-red-300',
   },
   VOTE_RESOLUTION: {
-    icon: '⚖️',
+    icon: <SkullMark size={36} className="text-red-400" />,
     title: 'Votes Are In',
     subtitle: 'The village has spoken. The results are being tallied.',
     border: 'border-red-800/40',
@@ -59,7 +65,7 @@ const CFG: Partial<Record<GamePhase, PhaseCfg>> = {
     accentColor: 'text-red-400',
   },
   GAME_OVER: {
-    icon: '🏁',
+    icon: <TrophyIcon size={36} className="text-gold" />,
     title: 'Game Over',
     subtitle: 'The dust has settled. See who was who.',
     border: 'border-border',
@@ -73,17 +79,19 @@ export default function PhaseBanner({ phase, round }: { phase: GamePhase; round:
   if (!cfg) return null
 
   return (
-    <div className={`rounded-2xl border ${cfg.border} ${cfg.bg} px-5 py-4 animate-fade-up`}>
-      <div className="flex items-center gap-4">
-        <div className="text-3xl flex-shrink-0">{cfg.icon}</div>
+    <div className={`relative overflow-hidden rounded-2xl border ${cfg.border} ${cfg.bg} px-5 py-4 animate-fade-up`}>
+      <div className="relative z-10 flex items-center gap-4">
+        <div className="flex w-12 items-center justify-center flex-shrink-0" aria-hidden="true">
+          {cfg.icon}
+        </div>
         <div className="min-w-0">
           <div className="flex items-center gap-2 mb-0.5">
             <span className={`text-xs font-bold uppercase tracking-widest ${cfg.accentColor}`}>
               {round > 0 ? `Round ${round}` : 'Game'}
             </span>
           </div>
-          <h2 className="text-xl font-bold text-text-primary leading-tight">{cfg.title}</h2>
-          <p className="text-xs text-text-muted mt-0.5 leading-relaxed">{cfg.subtitle}</p>
+          <h2 className="font-display text-2xl tracking-wider text-text-primary leading-none">{cfg.title}</h2>
+          <p className="text-xs text-text-muted mt-1 leading-relaxed">{cfg.subtitle}</p>
         </div>
       </div>
     </div>

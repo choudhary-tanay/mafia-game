@@ -1,0 +1,851 @@
+# Phase 9: Villager Night Engagement Questions
+
+Read the entire project first before making changes.
+
+Implement this new gameplay/UI phase carefully without breaking the current Mafia game flow.
+
+Currently, during the night phase, Mafia, Doctor, and Detective have actions, but Villagers sit idle. This creates a problem in real-life party play because only special roles are looking at their phones, which can make it obvious who has a role.
+
+Add a new **Night Engagement Question** experience so Villagers also have something to do while Mafia, Doctor, and Detective are performing night actions.
+
+The goal is to keep all players engaged and make phone activity less suspicious.
+
+---
+
+# Main Goal
+
+During the Night phase:
+
+* Mafia chooses a target.
+* Doctor chooses someone to save.
+* Detective investigates someone.
+* Villagers receive a random fun question to answer.
+* After special roles submit their actions, they can also see a random question while waiting.
+* Everyone appears engaged during the night.
+* The question system must not affect core game logic or reveal hidden roles.
+
+This should make the game more fun, social, and less obvious.
+
+---
+
+# Important Design Rule
+
+The villager question should be a **cover activity**, not a required game action.
+
+Villager answers must not block the game from moving forward.
+
+Night should still resolve when:
+
+```text
+All required special role actions are submitted
+OR
+Night timer ends
+```
+
+Do not wait for Villagers to answer questions.
+
+---
+
+# New Phase / UI State
+
+Add a new night experience called:
+
+```text
+Night Engagement
+```
+
+or
+
+```text
+Night Questions
+```
+
+This can be implemented as either:
+
+Option A:
+
+* Keep backend phase as `NIGHT_ACTIONS_OPEN`
+* Show different UI based on player role
+* Villagers see question UI
+* Special roles see action UI
+
+Option B:
+
+* Rename/add phase as `NIGHT_ACTIVITY`
+* In this phase, every player has something to do:
+
+  * Mafia: choose target
+  * Doctor: choose save
+  * Detective: choose investigation
+  * Villager: answer random question
+
+Use whichever is safer for the existing codebase.
+
+Do not break existing phase transitions.
+
+---
+
+# Villager Night Question Behavior
+
+When a Villager enters the night phase, show:
+
+Title:
+
+```text
+Night Question
+```
+
+Subtitle:
+
+```text
+The village sleeps, but your mind is awake.
+Answer this while the night unfolds.
+```
+
+Show one random question.
+
+Examples:
+
+```text
+Who in this room would be the worst liar?
+```
+
+```text
+If you had to trust one player right now, who would it be?
+```
+
+```text
+Who looks the most suspicious so far?
+```
+
+```text
+What would your alibi be if someone accused you?
+```
+
+```text
+Which player would survive longest in a horror movie?
+```
+
+```text
+Who would you never trust with a secret?
+```
+
+```text
+If the Mafia was watching you, what would you say to look innocent?
+```
+
+```text
+Describe your strategy in one sentence.
+```
+
+```text
+Who seems too quiet?
+```
+
+```text
+Who is acting too confident?
+```
+
+Question UI should include:
+
+* Question text
+* Answer input
+* Submit Answer button
+* Skip button, optional
+* Waiting state after submit
+
+After Villager submits answer:
+
+```text
+Answer submitted. Waiting for morning...
+```
+
+If Villager skips:
+
+```text
+Skipped. Waiting for morning...
+```
+
+---
+
+# Special Role Behavior After Submit
+
+Mafia, Doctor, and Detective should first see their role action.
+
+After they submit their required night action, show them a random night question too.
+
+Example:
+
+Mafia flow:
+
+```text
+Choose target
+→ Submit Mafia Target
+→ Target submitted
+→ Show Night Question while waiting
+```
+
+Doctor flow:
+
+```text
+Choose player to save
+→ Submit Save
+→ Save submitted
+→ Show Night Question while waiting
+```
+
+Detective flow:
+
+```text
+Choose player to investigate
+→ Submit Investigation
+→ Investigation submitted
+→ Show Night Question while waiting
+```
+
+This ensures special roles are also not stuck on a blank waiting screen.
+
+---
+
+# Important Anti-Suspicion Rule
+
+Do not visually reveal who has a special role.
+
+The UI should make every player appear similarly busy during night.
+
+For example:
+
+* Villagers see question immediately.
+* Special roles see action first, then question after submitting.
+* Waiting state should look similar for everyone.
+* Do not show public indicators like:
+  “Mafia has submitted”
+  “Doctor is still choosing”
+  “Detective is done”
+
+Allowed public text:
+
+```text
+Waiting for the night to end...
+```
+
+Not allowed public text:
+
+```text
+Waiting for Doctor...
+```
+
+```text
+Mafia has selected a target.
+```
+
+```text
+Detective is still investigating.
+```
+
+---
+
+# Question Answer Visibility
+
+For first implementation, keep answers simple and safe.
+
+Recommended behavior:
+
+* Answers are private during night.
+* After night ends, optionally show a few submitted answers in the discussion phase as “Night Thoughts”.
+* Do not show which role submitted which answer.
+* Do not reveal hidden roles through answers.
+
+Simpler first version:
+
+* Store answers.
+* Show them only to the same player.
+* Do not display publicly yet.
+
+Preferred fun version:
+
+During Discussion phase, show a small section:
+
+```text
+Night Thoughts
+```
+
+Display submitted answers like:
+
+```text
+“Someone said: I think Alex is too quiet.”
+```
+
+Do not show role.
+
+You may show player name only if it does not hurt gameplay. Safer version:
+
+```text
+Anonymous night thought:
+“I think Alex is too quiet.”
+```
+
+Use anonymous display for first version.
+
+---
+
+# Database Requirements
+
+Add a table/model if needed.
+
+## NightQuestions
+
+Can be static JSON or database table.
+
+Fields if database table is used:
+
+* id
+* questionText
+* category
+* isActive
+* createdAt
+
+Categories:
+
+* suspicion
+* funny
+* alibi
+* trust
+* strategy
+* icebreaker
+
+## NightQuestionAnswers
+
+Create table/model:
+
+* id
+* gameId
+* roundId
+* roomId
+* playerId or gamePlayerId
+* userId nullable
+* guestId nullable
+* questionText
+* answerText nullable
+* skipped boolean
+* createdAt
+
+Rules:
+
+* One answer per player per round.
+* Answer is optional.
+* Skipped answers are allowed.
+* Answer should not block night resolution.
+* Validate answer length.
+
+Answer validation:
+
+* Minimum: optional
+* Maximum: 200 characters
+* Trim whitespace
+* Empty answer counts as skipped
+
+---
+
+# Backend Requirements
+
+Add backend functions:
+
+```text
+getRandomNightQuestion(playerId, gameId, roundId)
+submitNightQuestionAnswer(gameId, roundId, answerText)
+skipNightQuestion(gameId, roundId)
+getNightThoughtsForDiscussion(gameId, roundId)
+```
+
+Backend rules:
+
+* Only current room/game players can receive questions.
+* Dead players should not receive active night questions.
+* Spectators should not submit answers.
+* Each alive player gets one question per night.
+* Player cannot submit multiple answers for the same round.
+* Player identity must be based on `userId` or `guestId`, not display name.
+* Guest players must be supported.
+* Authenticated players must be supported.
+* Do not expose role data through question APIs.
+
+---
+
+# Night Phase Integration
+
+Current night logic must still work.
+
+Night resolution should depend only on required special actions:
+
+```text
+Mafia target submitted
+Doctor save submitted if Doctor alive
+Detective investigation submitted if Detective alive
+```
+
+Do not include Villager question answers in this required action check.
+
+Pseudo logic:
+
+```text
+after submitNightAction:
+    save action
+
+    if allRequiredNightActionsSubmitted:
+        resolveNight()
+        moveToDayAnnouncementOrDiscussion()
+        broadcastPhaseChange()
+    else:
+        keepWaiting()
+```
+
+Question answer logic:
+
+```text
+after submitNightQuestionAnswer:
+    save answer
+    show waiting state
+    do not trigger night resolution unless special role actions are complete separately
+```
+
+Timer fallback remains:
+
+```text
+if nightTimerEnds:
+    resolveNightWithAvailableActions()
+    moveToDayAnnouncementOrDiscussion()
+    broadcastPhaseChange()
+```
+
+---
+
+# Frontend UI Requirements
+
+Create a reusable component:
+
+```text
+NightQuestionCard
+```
+
+It should show:
+
+* Dramatic title
+* Random question
+* Text input
+* Submit button
+* Skip button
+* Submitted/waiting state
+
+UI copy:
+
+Before answer:
+
+```text
+The night is quiet...
+Answer this while the village sleeps.
+```
+
+Submit button:
+
+```text
+Submit Thought
+```
+
+Skip button:
+
+```text
+Skip
+```
+
+After submit:
+
+```text
+Your thought has been saved. Waiting for morning...
+```
+
+After skip:
+
+```text
+You stayed silent. Waiting for morning...
+```
+
+---
+
+# Night Screen Layout
+
+For Villagers:
+
+```text
+Night Falls
+You have no special night power, but stay alert.
+
+[Night Question Card]
+
+Waiting for morning...
+```
+
+For Mafia before submit:
+
+```text
+Night Falls
+Choose who the Mafia will target.
+
+[Target Selection]
+
+[Submit Mafia Target]
+```
+
+For Mafia after submit:
+
+```text
+Target submitted.
+
+[Night Question Card]
+
+Waiting for morning...
+```
+
+For Doctor before submit:
+
+```text
+Night Falls
+Choose one player to protect.
+
+[Player Selection]
+
+[Submit Save]
+```
+
+For Doctor after submit:
+
+```text
+Save submitted.
+
+[Night Question Card]
+
+Waiting for morning...
+```
+
+For Detective before submit:
+
+```text
+Night Falls
+Choose one player to investigate.
+
+[Player Selection]
+
+[Submit Investigation]
+```
+
+For Detective after submit:
+
+```text
+Investigation submitted.
+
+[Night Question Card]
+
+Waiting for morning...
+```
+
+---
+
+# Discussion Phase Integration
+
+If Night Thoughts are displayed during discussion, show them in a small section.
+
+Title:
+
+```text
+Night Thoughts
+```
+
+Subtitle:
+
+```text
+Whispers from the village while everyone waited for morning.
+```
+
+Examples:
+
+```text
+Someone said: “Alex is acting too calm.”
+```
+
+```text
+Someone said: “I would trust Priya for now.”
+```
+
+Rules:
+
+* Keep anonymous by default.
+* Do not show role.
+* Do not show answers from dead players if they died that same night, unless safe.
+* Do not let answers reveal hidden night actions.
+* If no one answered, hide this section.
+
+This section should be fun but not mandatory.
+
+---
+
+# Question Bank
+
+Add at least 30 default questions.
+
+Use a mix of funny, suspicion-based, and icebreaker questions.
+
+Examples:
+
+```text
+Who seems the most suspicious right now?
+```
+
+```text
+Who is acting too innocent?
+```
+
+```text
+Who would you trust with your life in this village?
+```
+
+```text
+Who would be the best at lying?
+```
+
+```text
+Who would be the worst at keeping a secret?
+```
+
+```text
+If you were accused, what would your defense be?
+```
+
+```text
+Who has been too quiet?
+```
+
+```text
+Who has been talking too much?
+```
+
+```text
+Which player would make the best detective?
+```
+
+```text
+Which player would make the scariest Mafia?
+```
+
+```text
+Who would survive a horror movie?
+```
+
+```text
+Who would panic first in a mystery story?
+```
+
+```text
+Who gives the strongest villain energy?
+```
+
+```text
+Who seems like they know too much?
+```
+
+```text
+Who changed their opinion too quickly?
+```
+
+```text
+Who would you vote for if voting started now?
+```
+
+```text
+Who do you think is pretending to be confused?
+```
+
+```text
+What is your one-sentence alibi?
+```
+
+```text
+What is your current theory?
+```
+
+```text
+Who should the village watch closely?
+```
+
+```text
+Who is flying under the radar?
+```
+
+```text
+Who looks nervous?
+```
+
+```text
+Who seems too confident?
+```
+
+```text
+Who would betray the village for power?
+```
+
+```text
+Who do you trust the least right now?
+```
+
+```text
+Who do you trust the most right now?
+```
+
+```text
+What question would you ask the most suspicious player?
+```
+
+```text
+What is one clue everyone should notice?
+```
+
+```text
+Who is playing too safely?
+```
+
+```text
+Who is creating chaos?
+```
+
+Questions should be safe, non-offensive, party-friendly, and not too personal.
+
+---
+
+# UX Requirements
+
+The question experience should feel fun and mysterious.
+
+Use:
+
+* Dark card
+* Subtle animation
+* Typewriter or fade-in question effect, optional
+* Red/amber accent
+* Large readable question text
+* Mobile-friendly input
+* Clear submit/skip buttons
+* Smooth waiting state
+
+Do not make it feel like a boring form.
+
+---
+
+# Responsive Requirements
+
+Must work on:
+
+* Mobile
+* Tablet
+* Desktop
+
+Mobile:
+
+* Question card should fit screen width.
+* Input should not be too small.
+* Buttons should be easy to tap.
+* No horizontal scroll.
+* Text must not overlap.
+
+---
+
+# Edge Cases
+
+Handle:
+
+* Villager refreshes page during night.
+* Villager already submitted answer and refreshes.
+* Night phase ends while user is typing.
+* User submits answer after phase already ended.
+* User tries to submit multiple answers.
+* Guest user submits answer.
+* Authenticated user submits answer.
+* Dead player tries to submit answer.
+* Spectator tries to submit answer.
+* Realtime event moves user to discussion while question card is open.
+
+Expected behavior:
+
+* Refresh should restore submitted/skipped state.
+* If phase ended, redirect/update UI to current phase.
+* Duplicate answer submission should be rejected or ignored safely.
+* Dead/spectator users cannot submit.
+* UI should not get stuck.
+
+---
+
+# Acceptance Criteria
+
+* Villagers see a random night question during night phase.
+* Villagers can submit or skip the question.
+* Villager question answers do not block night resolution.
+* Mafia, Doctor, and Detective see their normal action first.
+* After special role action is submitted, they also see a night question while waiting.
+* Night still resolves immediately when all required special actions are submitted.
+* Night still resolves when timer ends.
+* The UI does not reveal who has a special role.
+* Public messages do not say which role has submitted.
+* Guest players can use night questions.
+* Authenticated players can use night questions.
+* Refresh/reconnect works.
+* Optional anonymous Night Thoughts appear during discussion if implemented.
+* No hidden role data leaks through the question system.
+* Mobile UI works properly.
+* Build passes.
+
+
+---
+
+# Testing Requirement
+
+Test the full flow with at least 4 players.
+
+Scenario:
+
+1. Create room.
+2. Join with 4 users.
+3. Start game.
+4. Confirm Villager sees Night Question during night.
+5. Confirm Mafia sees target selection first.
+6. Mafia submits target.
+7. Confirm Mafia then sees Night Question while waiting.
+8. Confirm Doctor sees save action first.
+9. Doctor submits save.
+10. Confirm Doctor then sees Night Question while waiting.
+11. Confirm Detective sees investigation action first.
+12. Detective submits investigation.
+13. Confirm Detective then sees Night Question while waiting.
+14. Confirm night resolves after all required actions are submitted.
+15. Confirm Villager answer did not block night resolution.
+16. Confirm timer fallback still works.
+17. Confirm discussion starts correctly.
+18. Confirm optional Night Thoughts display correctly if implemented.
+19. Confirm no one sees hidden roles or private actions.
+20. Confirm guest and authenticated users both work.
+
+
+Deploy on git and versel 
+
+
+---
+
+# Final Report Required
+
+After implementation, provide:
+
+1. Summary of the Night Engagement feature.
+2. Backend changes made.
+3. Frontend/UI changes made.
+4. Database changes made, if any.
+5. How the feature avoids exposing special roles.
+6. Test cases performed.
+7. Any remaining limitations.
+8. Confirmation that 15-player night flow was tested successfully and there was no UI gap while voting or eliminating.

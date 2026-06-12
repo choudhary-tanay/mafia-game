@@ -23,7 +23,7 @@ export default function JoinRoomForm() {
           placeholder="ABCD12"
           maxLength={6}
           autoComplete="off"
-          className="rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm font-mono uppercase tracking-widest text-text-primary placeholder:text-text-faint focus:outline-none focus:border-border-bright focus:ring-1 focus:ring-border/50 transition-all"
+          className="rounded-xl border border-border bg-surface-raised px-4 py-3 text-center text-xl font-mono uppercase tracking-[0.3em] text-text-primary placeholder:text-text-faint focus:outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/30 transition-all"
         />
         {state?.errors?.code?.[0] && (
           <p className="text-xs text-red-400">{state.errors.code[0]}</p>
@@ -32,12 +32,12 @@ export default function JoinRoomForm() {
       <button
         type="submit"
         disabled={pending}
-        className="flex items-center justify-center gap-2 rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm font-semibold text-text-primary hover:bg-surface-high hover:border-border-bright disabled:opacity-60 disabled:cursor-not-allowed transition-all"
+        className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm font-semibold text-text-primary hover:bg-surface-high hover:border-border-bright disabled:opacity-60 disabled:cursor-not-allowed transition-all"
       >
         {pending ? (
-          <><Loader2 size={15} className="animate-spin" /> Joining…</>
+          <><Loader2 size={15} className="animate-spin" /> Opening the village gates…</>
         ) : (
-          <><LogIn size={15} /> Join room</>
+          <><LogIn size={15} /> Join the village</>
         )}
       </button>
     </form>

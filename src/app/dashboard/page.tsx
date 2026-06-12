@@ -62,7 +62,7 @@ export default async function DashboardPage() {
             <form action={logout}>
               <button
                 type="submit"
-                className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-text-muted hover:text-red-400 hover:border-red-900/60 hover:bg-red-950/20 transition-all"
+                aria-label="Log out" className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 min-h-10 text-xs text-text-muted hover:text-red-400 hover:border-red-900/60 hover:bg-red-950/20 transition-all"
               >
                 <LogOut size={13} />
                 <span className="hidden sm:block">Log out</span>
@@ -77,16 +77,16 @@ export default async function DashboardPage() {
 
           {/* ── Welcome + rank ───────────────────────────────────────────────── */}
           <div className="animate-fade-up">
-            <div className={`rounded-2xl border ${rankMeta.border} ${rankMeta.bg} p-6 flex flex-col sm:flex-row sm:items-center gap-5`}>
+            <div className={`noise-overlay relative rounded-2xl border ${rankMeta.border} ${rankMeta.bg} p-6 flex flex-col sm:flex-row sm:items-center gap-5`}>
               {/* Avatar */}
-              <div className={`flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-2xl border-2 ${rankMeta.border} text-3xl font-black ${rankMeta.color}`}>
+              <div className={`flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-2xl border-2 ${rankMeta.border} bg-surface/50 text-3xl font-black ${rankMeta.color}`}>
                 {user.full_name.charAt(0).toUpperCase()}
               </div>
 
               {/* Info */}
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-bold uppercase tracking-widest text-text-muted mb-1">Welcome back</p>
-                <h1 className="text-2xl sm:text-3xl font-black text-text-primary truncate">
+                <h1 className="font-display text-4xl sm:text-5xl tracking-wide text-text-primary truncate">
                   {firstName}
                 </h1>
                 <p className="text-sm text-text-muted">{user.email}</p>
@@ -118,35 +118,38 @@ export default async function DashboardPage() {
           </div>
 
           {/* ── Actions ──────────────────────────────────────────────────────── */}
-          <div className="grid gap-4 sm:grid-cols-2 animate-fade-up" style={{ animationDelay: '0.1s' }}>
+          <div className="grid gap-4 sm:grid-cols-2 animate-fade-up stagger-2">
             {/* Create room */}
-            <div className="rounded-2xl border border-red-900/40 bg-gradient-to-b from-red-950/25 to-surface p-6 space-y-4 shadow-lg shadow-red-950/10">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-900/40 text-red-400">
-                  <Plus size={20} />
+            <div className="relative overflow-hidden rounded-2xl border border-red-900/40 bg-gradient-to-b from-red-950/25 to-surface p-6 shadow-lg shadow-red-950/10">
+              <div className="fog-layer" aria-hidden="true" />
+              <div className="relative z-10 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-900/40 text-red-400">
+                    <Plus size={20} />
+                  </div>
+                  <div>
+                    <p className="font-bold text-text-primary">Create your secret room</p>
+                    <p className="text-xs text-text-muted">Invite friends. Assign roles. Let the village decide.</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="font-bold text-text-primary">Create a room</p>
-                  <p className="text-xs text-text-muted">Host a new game</p>
-                </div>
+                <form action={createRoom}>
+                  <Button type="submit" className="w-full min-h-12 py-3 font-bold">
+                    <Zap size={16} />
+                    Create room
+                  </Button>
+                </form>
               </div>
-              <form action={createRoom}>
-                <Button type="submit" className="w-full py-3 font-bold">
-                  <Zap size={16} />
-                  Create room
-                </Button>
-              </form>
             </div>
 
             {/* Join room */}
-            <div className="rounded-2xl border border-border bg-surface p-6 space-y-4">
+            <div className="rounded-2xl border border-border bg-surface p-6 space-y-4 transition-colors hover:border-border-bright">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-raised text-text-muted">
                   <Target size={20} />
                 </div>
                 <div>
                   <p className="font-bold text-text-primary">Join a room</p>
-                  <p className="text-xs text-text-muted">Enter a room code</p>
+                  <p className="text-xs text-text-muted">Got a code? Slip in quietly.</p>
                 </div>
               </div>
               <JoinRoomForm />
@@ -154,7 +157,7 @@ export default async function DashboardPage() {
           </div>
 
           {/* ── Stats ────────────────────────────────────────────────────────── */}
-          <div className="animate-fade-up" style={{ animationDelay: '0.2s' }}>
+          <div className="animate-fade-up stagger-4">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-xs font-bold uppercase tracking-widest text-text-muted flex items-center gap-2">
                 <TrendingUp size={13} />
@@ -184,10 +187,10 @@ function StatCard({
   label: string; value: number | string; icon: string; highlight?: boolean
 }) {
   return (
-    <div className={`rounded-xl border p-4 ${
+    <div className={`rounded-xl border p-4 transition-colors ${
       highlight
-        ? 'border-accent/30 bg-gradient-to-b from-accent/10 to-surface'
-        : 'border-border bg-surface'
+        ? 'border-accent/30 bg-gradient-to-b from-accent/10 to-surface hover:border-accent/50'
+        : 'border-border bg-surface hover:border-border-bright'
     }`}>
       <p className="text-xs text-text-muted uppercase tracking-wide flex items-center gap-1.5 mb-2">
         <span>{icon}</span> {label}

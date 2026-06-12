@@ -4,7 +4,8 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { submitVote } from '@/app/actions/game'
 import type { PublicPlayer } from '@/types/database'
-import { Check, Skull, Loader2 } from 'lucide-react'
+import { Check, Loader2 } from 'lucide-react'
+import { BallotBox, SkullMark, HourglassIcon } from '@/components/ui/illustrations'
 
 type VoteCount = { user_id: string; display_name: string; count: number }
 
@@ -16,6 +17,7 @@ type Props = {
   myVoteTargetId: string | null | undefined
   voteCounts?: VoteCount[]
   phase: string
+  isPaused?: boolean
 }
 
 const AVATAR_COLORS = [
@@ -29,7 +31,7 @@ const AVATAR_COLORS = [
 ]
 
 export default function VotingPanel({
-  gameId, isAlive, players, currentUserId, myVoteTargetId, voteCounts, phase,
+  gameId, isAlive, players, currentUserId, myVoteTargetId, voteCounts, phase, isPaused = false,
 }: Props) {
   const router = useRouter()
   const [pending, setPending] = useState<string | 'ABSTAIN' | null>(null)
@@ -49,13 +51,13 @@ export default function VotingPanel({
     const total = voteCounts.reduce((s, v) => s + v.count, 0)
     const maxVotes = Math.max(...(voteCounts.map((v) => v.count)), 0)
     return (
-      <div className="rounded-2xl border border-red-900/40 bg-red-950/20 overflow-hidden">
+      <div className="rounded-2xl border border-red-900/40 bg-red-950/20 overflow-hidden animate-fade-up">
         <div className="px-5 py-4 border-b border-border/50">
-          <div className="flex items-center gap-2">
-            <span className="text-xl">⚖️</span>
+          <div className="flex items-center gap-3">
+            <BallotBox size={32} className="text-red-400 flex-shrink-0" />
             <div>
-              <p className="text-xs font-bold uppercase tracking-widest text-red-300">Votes tallied</p>
-              <p className="text-sm text-text-primary font-semibold">The village has decided.</p>
+              <p className="font-display text-2xl tracking-wider leading-none text-red-300">Votes Tallied</p>
+              <p className="text-sm text-text-muted mt-1">The village has decided.</p>
             </div>
           </div>
         </div>
@@ -67,11 +69,12 @@ export default function VotingPanel({
               const pct = total > 0 ? (v.count / total) * 100 : 0
               const isMost = v.count === maxVotes && v.count > 0
               return (
-                <div key={v.user_id} className={`space-y-1.5 p-3 rounded-xl ${isMost ? 'border border-red-800/50 bg-red-950/30' : 'bg-surface-raised'}`}>
+                <div key={v.user_id} className={`space-y-1.5 p-3 rounded-xl ${isMost ? 'border border-red-800/50 bg-red-950/30 role-glow-mafia' : 'bg-surface-raised'}`}>
                   <div className="flex items-center justify-between">
-                    <span className={`text-sm font-semibold ${isMost ? 'text-red-300' : 'text-text-primary'}`}>
+                    <span className={`flex items-center gap-1.5 text-sm font-semibold ${isMost ? 'text-red-300' : 'text-text-primary'}`}>
+                      {isMost && <SkullMark size={15} className="text-red-500 flex-shrink-0" />}
                       {v.display_name}
-                      {isMost && <span className="ml-2 text-xs text-red-400">← most votes</span>}
+                      {isMost && <span className="ml-1 text-xs text-red-400">← most votes</span>}
                     </span>
                     <span className="text-sm font-mono font-bold text-text-muted">
                       {v.count} vote{v.count !== 1 ? 's' : ''}
@@ -92,11 +95,22 @@ export default function VotingPanel({
     )
   }
 
+  // Paused — show blocked state (before dead-player check so dead players also see paused state)
+  if (isPaused && !isResolution) {
+    return (
+      <div className="rounded-2xl border border-amber-800/40 bg-amber-950/15 p-6 text-center animate-fade-up">
+        <HourglassIcon size={32} className="mx-auto mb-3 text-amber-400" />
+        <p className="font-display text-xl tracking-wider text-amber-400">Game Paused</p>
+        <p className="text-xs text-text-faint mt-1">Voting is disabled while the game is paused.</p>
+      </div>
+    )
+  }
+
   // Dead player during active voting
   if (!isAlive) {
     return (
-      <div className="rounded-2xl border border-border bg-surface p-6 text-center">
-        <Skull size={22} className="mx-auto mb-3 text-text-faint" />
+      <div className="rounded-2xl border border-border bg-surface p-6 text-center animate-fade-up">
+        <SkullMark size={30} className="mx-auto mb-3 text-text-faint" />
         <p className="text-sm font-semibold text-text-muted">You are eliminated.</p>
         <p className="text-xs text-text-faint mt-1">Watch as the village makes its choice.</p>
       </div>
@@ -104,6 +118,7 @@ export default function VotingPanel({
   }
 
   function submit(targetId: string | null) {
+    if (isPaused) { setError('The game is paused. Resume the game before voting.'); return }
     startTransition(async () => {
       const res = await submitVote(gameId, targetId)
       if (res.error) { setError(res.error); return }
@@ -121,17 +136,13 @@ export default function VotingPanel({
         ? 'Abstain'
         : players.find((p) => p.user_id === votedForId)?.display_name ?? 'your choice'
     return (
-      <div className="rounded-2xl border border-border bg-surface p-6 text-center">
-        <div className="flex items-center justify-center gap-2 mb-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-900/40">
-            <Check size={20} className="text-emerald-400" />
-          </div>
-        </div>
-        <p className="text-sm font-bold text-emerald-400 mb-1">Vote submitted</p>
+      <div className="rounded-2xl border border-border bg-surface p-6 text-center animate-fade-up">
+        <BallotBox size={40} className="mx-auto mb-3 text-emerald-400 animate-pop-in" />
+        <p className="font-display text-xl tracking-wider text-emerald-400 mb-1">Vote Submitted</p>
         <p className="text-xs text-text-muted">
           Voted: <span className="text-text-primary font-semibold">{votedName}</span>
         </p>
-        <p className="text-xs text-text-faint mt-3">Waiting for others to vote…</p>
+        <p className="text-xs text-text-faint mt-3">Waiting for the others to decide…</p>
       </div>
     )
   }
@@ -140,26 +151,26 @@ export default function VotingPanel({
   const candidates = alivePlayers.filter((p) => p.user_id !== currentUserId)
 
   return (
-    <div className="rounded-2xl border border-red-900/40 bg-red-950/15 overflow-hidden">
+    <div className="rounded-2xl border border-red-900/40 bg-red-950/15 overflow-hidden animate-fade-up">
       {/* Header */}
       <div className="px-5 py-4 border-b border-border/50">
         <div className="flex items-center gap-3">
-          <span className="text-2xl">🗳️</span>
+          <BallotBox size={32} className="text-red-400 flex-shrink-0" />
           <div>
-            <p className="text-xs font-bold uppercase tracking-widest text-red-300">Voting</p>
-            <p className="text-sm font-semibold text-text-primary">Who is Mafia? Choose carefully.</p>
+            <p className="font-display text-2xl tracking-wider leading-none text-red-300">The Village Votes</p>
+            <p className="text-sm text-text-muted mt-1">Who is Mafia? Choose carefully.</p>
           </div>
         </div>
       </div>
 
       <div className="p-4 space-y-4">
         {error && (
-          <p className="rounded-lg border border-red-700/40 bg-red-950/30 px-3 py-2 text-xs text-red-400">
+          <p className="rounded-lg border border-red-700/40 bg-red-950/30 px-3 py-2 text-xs text-red-400 animate-shake">
             ⚠ {error}
           </p>
         )}
 
-        {/* Candidate grid */}
+        {/* Candidate grid — vote cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {candidates.map((p, i) => {
             const isSelected = pending === p.user_id
@@ -168,11 +179,12 @@ export default function VotingPanel({
               <button
                 key={p.user_id}
                 onClick={() => { setPending(p.user_id); setError(null) }}
+                aria-pressed={isSelected}
                 disabled={isPending}
                 className={`flex flex-col items-center gap-2 rounded-xl p-4 text-sm font-semibold transition-all border ${
                   isSelected
-                    ? 'border-red-700/60 text-red-300 bg-red-950/40 ring-2 ring-red-700/30 scale-105'
-                    : 'border-border bg-surface-raised text-text-primary hover:bg-surface-high hover:border-border-bright hover:scale-102'
+                    ? 'border-red-600/70 text-red-300 bg-red-950/50 ring-2 ring-red-600/40 animate-vote-alarm -translate-y-0.5'
+                    : 'border-border bg-surface-raised text-text-primary hover:bg-surface-high hover:border-border-bright hover:-translate-y-0.5'
                 } disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 <div className={`h-10 w-10 flex items-center justify-center rounded-full text-sm font-bold ${
@@ -181,7 +193,7 @@ export default function VotingPanel({
                   {p.display_name.charAt(0).toUpperCase()}
                 </div>
                 <span className="text-xs text-center leading-tight">{p.display_name}</span>
-                {isSelected && <Check size={12} className="text-red-400" />}
+                {isSelected && <Check size={12} className="text-red-400 animate-pop-in" />}
               </button>
             )
           })}
@@ -197,9 +209,9 @@ export default function VotingPanel({
         <button
           onClick={() => { if (pending && pending !== 'ABSTAIN') submit(pending) }}
           disabled={!pending || pending === 'ABSTAIN' || isPending}
-          className={`w-full flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold transition-all border ${
+          className={`w-full min-h-[44px] flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold uppercase tracking-wide transition-all border ${
             pending && pending !== 'ABSTAIN' && !isPending
-              ? 'border-red-700/60 bg-red-950/40 text-red-200 hover:bg-red-950/60'
+              ? 'border-red-500/60 bg-red-600 text-white hover:bg-red-500 shadow-lg shadow-red-950/50'
               : 'border-border bg-surface text-text-faint cursor-not-allowed opacity-50'
           }`}
         >
@@ -209,7 +221,7 @@ export default function VotingPanel({
             <>
               Cast Vote
               {pending && pending !== 'ABSTAIN' && (
-                <span className="opacity-75">
+                <span className="opacity-90 normal-case">
                   — {players.find((p) => p.user_id === pending)?.display_name}
                 </span>
               )}
@@ -217,11 +229,11 @@ export default function VotingPanel({
           )}
         </button>
 
-        {/* Abstain */}
+        {/* Abstain — secondary ghost row */}
         <button
           onClick={() => { setPending('ABSTAIN'); submit(null) }}
           disabled={isPending}
-          className="w-full rounded-xl border border-border px-3 py-2.5 text-xs text-text-muted hover:text-text-primary hover:bg-surface-raised hover:border-border-bright transition-all disabled:opacity-50"
+          className="w-full min-h-[44px] rounded-xl border border-transparent px-3 py-2.5 text-xs text-text-faint hover:text-text-primary hover:bg-surface-raised hover:border-border transition-all disabled:opacity-50"
         >
           Abstain — pass on this vote
         </button>

@@ -1,0 +1,897 @@
+Read the entire project first before making any changes.
+
+I have added Bollywood reaction images for scenarios **01 to 29 only**.
+
+Do not implement scenarios 30, 31, or 32 right now.
+
+Ignore these for now:
+
+* `30_invalid_action.png`
+* `31_host_starts_game.png`
+* `32_final_round_tense.png`
+
+Implement Bollywood Style Mode using only the 29 available image files.
+
+---
+
+# Goal
+
+Add / complete the Bollywood Style reaction popup system using the images placed in:
+
+```text
+/Users/tanaychoudhary/MAFIA_GAME/mafia-game/Bollywood meme image
+```
+
+The game should support:
+
+1. Normal Mode
+2. Bollywood Style Mode
+
+Normal Mode should work exactly as it currently does.
+
+Bollywood Style Mode should show meme-style popup modals for supported gameplay events.
+
+---
+
+# Required Image Files
+
+Use these exact files:
+
+|  # | File name                              | Caption                                              |
+| -: | -------------------------------------- | ---------------------------------------------------- |
+| 01 | `01_doctor_blocks_mafia_attack.png`    | Kya gunda banega re tu                               |
+| 02 | `02_mafia_kill_victim_view.png`        | Humko maro, humko zinda mat chhodo saalo             |
+| 03 | `03_mafia_kill_mafia_view.png`         | Shhh... kaam ho gaya.                                |
+| 04 | `04_doctor_self_save.png`              | Bilkul risk nahi lene ka                             |
+| 05 | `05_mafia_caught_others_alive.png`     | Ab underground hone ka samay aa gaya hai             |
+| 06 | `06_villagers_win_common_man.png`      | Don’t underestimate the power of a common man        |
+| 07 | `07_mafia_loses.png`                   | Beta tumse na ho payega                              |
+| 08 | `08_mafia_wins.png`                    | Main hoon Don                                        |
+| 09 | `09_wrong_villager_voted_public.png`   | Meri aankhon me dekh                                 |
+| 10 | `10_wrong_villager_voted_private.png`  | Galat insaan pakad liya                              |
+| 11 | `11_detective_finds_mafia.png`         | Tera toh game bajana padega                          |
+| 12 | `12_detective_finds_innocent.png`      | Abey saale                                           |
+| 13 | `13_no_one_dies_at_night.png`          | Bach gaya saale                                      |
+| 14 | `14_lone_mafia_comeback.png`           | Game abhi baaki hai                                  |
+| 15 | `15_first_elimination.png`             | Bhagoo!                                              |
+| 16 | `16_tie_vote_no_elimination.png`       | Yaar aise game me cheating hogi to mai nahi khelunga |
+| 17 | `17_doctor_dies.png`                   | Aise kaun karta hai bhai                             |
+| 18 | `18_detective_dies.png`                | Sir ek buri khabar hai                               |
+| 19 | `19_mafia_caught_overconfident.png`    | Zyada hawa mat banao, pakde jaoge                    |
+| 20 | `20_doctor_clutch_save.png`            | Main to nahin hoon insaano mein                      |
+| 21 | `21_village_perfect_vote.png`          | Miracle! Miracle!                                    |
+| 22 | `22_everyone_abstains.png`             | Beta maine gandi gaali de deni hai                   |
+| 23 | `23_doctor_saves_other_player.png`     | Itni khushi mujhe aaj tak nahi hui                   |
+| 24 | `24_target_survives_due_to_doctor.png` | Bach gaya saale                                      |
+| 25 | `25_mafia_kill_fails.png`              | Nahi... sachhi? Main nahi manta                      |
+| 26 | `26_village_eliminates_doctor.png`     | Aise kaun karta hai bhai                             |
+| 27 | `27_village_eliminates_detective.png`  | Sir ek buri khabar hai                               |
+| 28 | `28_unanimous_vote.png`                | Hamare mohalle ka shikari hai ye                     |
+| 29 | `29_repeated_tie_no_decision.png`      | Yaar aise game me cheating hogi to mai nahi khelunga |
+
+---
+
+# Implementation Requirements
+
+Create a reusable reaction system.
+
+Suggested components/modules:
+
+```text
+BollywoodReactionModal
+bollywoodReactionMap
+resolveBollywoodReaction
+reactionQueue
+```
+
+Each reaction config should include:
+
+```text
+eventKey
+imagePath
+caption
+audienceScope
+durationMs
+showCloseButton
+autoClose
+priority
+```
+
+Every popup must:
+
+* show image
+* show caption
+* have a visible close button
+* close on Escape
+* be mobile responsive
+* not trap the user
+* not break phase movement
+* not reveal hidden roles
+* fallback to caption text if image is missing
+
+---
+
+# Host Setting
+
+Add or verify host setting:
+
+```text
+Game Mode
+```
+
+Options:
+
+```text
+Normal
+Bollywood Style
+```
+
+Requirements:
+
+* Default is Normal
+* Host can change it
+* Guest Host can change it
+* Logged-in Host can change it
+* Setting saves to backend/database
+* Setting displays correctly after save
+* Setting persists after refresh
+* Lobby shows selected mode
+* Gameplay receives selected mode
+
+---
+
+# Event Mapping To Implement
+
+Implement these 29 supported scenarios.
+
+## 01 Doctor blocks Mafia attack
+
+Trigger:
+
+* Mafia target equals Doctor save target
+
+Audience:
+
+* all players
+
+Image:
+
+* `01_doctor_blocks_mafia_attack.png`
+
+Caption:
+
+* “Kya gunda banega re tu”
+
+---
+
+## 02 Mafia kill success — victim view
+
+Trigger:
+
+* Mafia successfully kills a player
+
+Audience:
+
+* only killed player
+
+Image:
+
+* `02_mafia_kill_victim_view.png`
+
+Caption:
+
+* “Humko maro, humko zinda mat chhodo saalo”
+
+---
+
+## 03 Mafia kill success — Mafia view
+
+Trigger:
+
+* Mafia successfully kills a player
+
+Audience:
+
+* only Mafia players
+
+Image:
+
+* `03_mafia_kill_mafia_view.png`
+
+Caption:
+
+* “Shhh... kaam ho gaya.”
+
+---
+
+## 04 Doctor self-save
+
+Trigger:
+
+* Doctor saves themselves
+
+Audience:
+
+* only Doctor
+
+Image:
+
+* `04_doctor_self_save.png`
+
+Caption:
+
+* “Bilkul risk nahi lene ka”
+
+---
+
+## 05 Mafia caught while other Mafia alive
+
+Trigger:
+
+* one Mafia is eliminated
+* at least one other Mafia is still alive
+
+Audience:
+
+* remaining Mafia players
+
+Image:
+
+* `05_mafia_caught_others_alive.png`
+
+Caption:
+
+* “Ab underground hone ka samay aa gaya hai”
+
+---
+
+## 06 Villagers win
+
+Trigger:
+
+* Village side wins
+
+Audience:
+
+* village-side players: Villager, Doctor, Detective
+
+Image:
+
+* `06_villagers_win_common_man.png`
+
+Caption:
+
+* “Don’t underestimate the power of a common man”
+
+---
+
+## 07 Mafia loses
+
+Trigger:
+
+* Mafia loses
+
+Audience:
+
+* Mafia players
+
+Image:
+
+* `07_mafia_loses.png`
+
+Caption:
+
+* “Beta tumse na ho payega”
+
+---
+
+## 08 Mafia wins
+
+Trigger:
+
+* Mafia wins
+
+Audience:
+
+* Mafia players
+
+Image:
+
+* `08_mafia_wins.png`
+
+Caption:
+
+* “Main hoon Don”
+
+---
+
+## 09 Wrong Villager voted out — public
+
+Trigger:
+
+* village votes out a non-Mafia player
+* reveal-role-on-death is enabled or the event is safe to show publicly
+
+Audience:
+
+* all players
+
+Image:
+
+* `09_wrong_villager_voted_public.png`
+
+Caption:
+
+* “Meri aankhon me dekh”
+
+---
+
+## 10 Wrong Villager voted out — private
+
+Trigger:
+
+* village votes out a non-Mafia player
+
+Audience:
+
+* only eliminated non-Mafia player
+
+Image:
+
+* `10_wrong_villager_voted_private.png`
+
+Caption:
+
+* “Galat insaan pakad liya”
+
+---
+
+## 11 Detective finds Mafia
+
+Trigger:
+
+* Detective investigates a Mafia player
+
+Audience:
+
+* only Detective
+
+Image:
+
+* `11_detective_finds_mafia.png`
+
+Caption:
+
+* “Tera toh game bajana padega”
+
+---
+
+## 12 Detective finds innocent
+
+Trigger:
+
+* Detective investigates a non-Mafia player
+
+Audience:
+
+* only Detective
+
+Image:
+
+* `12_detective_finds_innocent.png`
+
+Caption:
+
+* “Abey saale”
+
+---
+
+## 13 No one dies at night
+
+Trigger:
+
+* night resolves and no player dies
+
+Audience:
+
+* all players
+
+Image:
+
+* `13_no_one_dies_at_night.png`
+
+Caption:
+
+* “Bach gaya saale”
+
+---
+
+## 14 Lone Mafia comeback
+
+Trigger:
+
+* only one Mafia remains alive
+* and that Mafia survives a critical round or later wins
+
+Audience:
+
+* that Mafia player or Mafia team
+
+Image:
+
+* `14_lone_mafia_comeback.png`
+
+Caption:
+
+* “Game abhi baaki hai”
+
+---
+
+## 15 First elimination
+
+Trigger:
+
+* first player death or first vote elimination of the game
+
+Audience:
+
+* all players
+
+Image:
+
+* `15_first_elimination.png`
+
+Caption:
+
+* “Bhagoo!”
+
+---
+
+## 16 Tie vote / no elimination
+
+Trigger:
+
+* voting ends in tie and no one is eliminated
+
+Audience:
+
+* all players
+
+Image:
+
+* `16_tie_vote_no_elimination.png`
+
+Caption:
+
+* “Yaar aise game me cheating hogi to mai nahi khelunga”
+
+---
+
+## 17 Doctor dies
+
+Trigger:
+
+* Doctor is killed or voted out
+
+Audience:
+
+* all players if reveal-role-on-death is enabled
+* otherwise only Doctor privately
+
+Image:
+
+* `17_doctor_dies.png`
+
+Caption:
+
+* “Aise kaun karta hai bhai”
+
+---
+
+## 18 Detective dies
+
+Trigger:
+
+* Detective is killed or voted out
+
+Audience:
+
+* all players if reveal-role-on-death is enabled
+* otherwise only Detective privately
+
+Image:
+
+* `18_detective_dies.png`
+
+Caption:
+
+* “Sir ek buri khabar hai”
+
+---
+
+## 19 Mafia caught overconfident
+
+Trigger:
+
+* Mafia is eliminated in an early round or very quickly
+
+Audience:
+
+* eliminated Mafia or remaining Mafia
+
+Image:
+
+* `19_mafia_caught_overconfident.png`
+
+Caption:
+
+* “Zyada hawa mat banao, pakde jaoge”
+
+---
+
+## 20 Doctor clutch save
+
+Trigger:
+
+* Doctor saves the Mafia target in a critical late-game situation
+
+Audience:
+
+* only Doctor
+
+Image:
+
+* `20_doctor_clutch_save.png`
+
+Caption:
+
+* “Main to nahin hoon insaano mein”
+
+---
+
+## 21 Village perfect vote
+
+Trigger:
+
+* village correctly eliminates Mafia with strong consensus
+
+Audience:
+
+* village-side players
+* all players only if reveal is safe
+
+Image:
+
+* `21_village_perfect_vote.png`
+
+Caption:
+
+* “Miracle! Miracle!”
+
+---
+
+## 22 Everyone abstains
+
+Trigger:
+
+* all alive players abstain
+* or no valid votes are submitted
+
+Audience:
+
+* all players
+
+Image:
+
+* `22_everyone_abstains.png`
+
+Caption:
+
+* “Beta maine gandi gaali de deni hai”
+
+---
+
+## 23 Doctor saves another player
+
+Trigger:
+
+* Doctor saves a player other than themselves
+
+Audience:
+
+* only Doctor
+
+Image:
+
+* `23_doctor_saves_other_player.png`
+
+Caption:
+
+* “Itni khushi mujhe aaj tak nahi hui”
+
+Important:
+
+* Do not show this if stronger reaction 01 or 20 applies.
+
+---
+
+## 24 Target survives due to Doctor
+
+Trigger:
+
+* Mafia target was protected by Doctor
+
+Audience:
+
+* only target player
+
+Image:
+
+* `24_target_survives_due_to_doctor.png`
+
+Caption:
+
+* “Bach gaya saale”
+
+Important:
+
+* Do not reveal Doctor identity.
+
+---
+
+## 25 Mafia kill fails
+
+Trigger:
+
+* Mafia selected target but no one died because of Doctor save
+
+Audience:
+
+* only Mafia players
+
+Image:
+
+* `25_mafia_kill_fails.png`
+
+Caption:
+
+* “Nahi... sachhi? Main nahi manta”
+
+---
+
+## 26 Village eliminates Doctor
+
+Trigger:
+
+* Doctor is eliminated by village vote
+
+Audience:
+
+* all players if reveal-role-on-death is enabled
+* otherwise only Doctor
+
+Image:
+
+* `26_village_eliminates_doctor.png`
+
+Caption:
+
+* “Aise kaun karta hai bhai”
+
+---
+
+## 27 Village eliminates Detective
+
+Trigger:
+
+* Detective is eliminated by village vote
+
+Audience:
+
+* all players if reveal-role-on-death is enabled
+* otherwise only Detective
+
+Image:
+
+* `27_village_eliminates_detective.png`
+
+Caption:
+
+* “Sir ek buri khabar hai”
+
+---
+
+## 28 Unanimous vote
+
+Trigger:
+
+* all alive voters vote for the same target
+
+Audience:
+
+* all players
+
+Image:
+
+* `28_unanimous_vote.png`
+
+Caption:
+
+* “Hamare mohalle ka shikari hai ye”
+
+---
+
+## 29 Repeated tie / no decision
+
+Trigger:
+
+* two or more tie/no-elimination votes happen in the same game
+
+Audience:
+
+* all players
+
+Image:
+
+* `29_repeated_tie_no_decision.png`
+
+Caption:
+
+* “Yaar aise game me cheating hogi to mai nahi khelunga”
+
+---
+
+# Priority Rules
+
+If multiple reactions apply at the same time, do not spam users.
+
+Use this priority:
+
+1. Game over reactions
+2. Detective private reactions
+3. Doctor clutch/save reactions
+4. Mafia kill/fail reactions
+5. Vote elimination reactions
+6. Tie/abstain reactions
+7. Flavor reactions
+
+Show maximum 1 to 2 popups per event.
+
+Do not show weaker duplicate reactions if a stronger one already applies.
+
+Examples:
+
+* If Doctor blocks Mafia attack, show 01 to all, 24 to target, 25 to Mafia if scoped queue supports it.
+* If Doctor clutch save applies, show 20 to Doctor instead of 23.
+* If village eliminates Doctor, use 26 instead of generic 17 if it was by vote.
+* If village eliminates Detective, use 27 instead of generic 18 if it was by vote.
+* If repeated tie applies, prefer 29 over 16.
+
+---
+
+# Security Requirements
+
+* Do not leak hidden roles.
+* Do not show Doctor/Detective death publicly unless role reveal is enabled.
+* Do not show Mafia-only reactions to non-Mafia.
+* Do not show Detective result reactions to anyone except Detective.
+* Do not let frontend decide private audience visibility.
+* Backend should provide already-authorized reactions where possible.
+* Guest users and authenticated users must both be supported.
+
+---
+Fix the Bollywood reaction popup image sizing.
+
+Issue:
+The popup currently shows images in a fixed size, so some memes/images look cropped, stretched, too small, or too large.
+
+Requirement:
+Make the popup dynamically adapt based on the actual image size and screen size.
+
+Rules:
+
+1. Image should keep its original aspect ratio.
+2. Image must never be stretched or distorted.
+3. Image should fit inside the popup without being cut off.
+4. Popup should resize naturally based on image dimensions.
+5. On large screens, image can be larger but should not exceed safe viewport limits.
+6. On mobile, image should fit within screen width and height.
+7. Caption and close button must always remain visible.
+8. User should not need horizontal scrolling.
+9. If image is very tall, allow vertical scroll inside popup or scale image down.
+10. If image is very wide, scale it down to fit screen width.
+
+Suggested CSS behavior:
+
+```css
+.reaction-modal {
+  max-width: min(90vw, 720px);
+  max-height: 90vh;
+}
+
+.reaction-image {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  aspect-ratio: auto;
+}
+```
+
+Also ensure:
+
+* close button stays fixed/visible inside popup
+* caption remains readable below image
+* popup works for portrait, landscape, square, and small images
+* missing image fallback still works
+
+Test with multiple image shapes:
+
+* portrait meme
+* landscape meme
+* square meme
+* very tall image
+* very wide image
+
+Acceptance Criteria:
+
+* No image is cropped.
+* No image is stretched.
+* Popup adapts to image size.
+* Popup is responsive on desktop and mobile.
+* Close button and caption are always visible.
+
+# UI Requirements
+
+Bollywood popup modal:
+
+* dark backdrop
+* centered card
+* meme image
+* bold caption
+* close X button
+* optional Continue button
+* Escape key closes
+* mobile responsive
+* no permanent blocking
+* optional auto-close after 2–4 seconds
+* if image missing, show caption text fallback
+
+---
+
+# Testing Requirements
+
+Test:
+
+1. Normal Mode shows no Bollywood popups.
+2. Host selects Bollywood Style.
+3. Setting saves correctly.
+4. Setting displays correctly for Host and players.
+5. Setting persists after refresh.
+6. Each of the 29 scenarios maps to correct image/caption where possible.
+7. Close button works.
+8. Escape closes popup.
+9. Popup works on mobile.
+10. Popup does not block phase progression.
+11. Guest players see correct scoped popups.
+12. Logged-in players see correct scoped popups.
+13. Hidden role data is not leaked.
+14. Missing image fallback does not crash the app.
+
+---
+
+# Final Report Required
+
+After finishing, provide:
+
+1. Summary of Bollywood popup system.
+2. Confirmation only scenarios 01–29 were implemented.
+3. Files changed.
+4. Asset mapping created.
+5. Audience scoping logic.
+6. Priority logic.
+7. Tests performed.
+8. Any remaining limitations.
+9. Confirmation that Normal Mode still works.
+10. Confirmation that Bollywood Style Mode works.

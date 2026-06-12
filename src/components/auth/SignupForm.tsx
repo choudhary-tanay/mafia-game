@@ -20,7 +20,7 @@ export default function SignupForm() {
   return (
     <form action={action} className="flex flex-col gap-4">
       {state?.generalError && (
-        <div className="rounded-xl border border-red-700/40 bg-red-950/30 px-4 py-3 text-sm text-red-300">
+        <div className="animate-shake rounded-xl border border-red-700/40 bg-red-950/30 px-4 py-3 text-sm text-red-300">
           ⚠ {state.generalError}
         </div>
       )}
@@ -74,9 +74,15 @@ export default function SignupForm() {
         error={state?.errors?.confirmPassword?.[0]}
       />
 
-      <Button type="submit" loading={pending} className="mt-2 w-full py-3 text-base">
-        <UserPlus size={17} />
-        Create account
+      <Button type="submit" loading={pending} className="mt-2 w-full min-h-12 py-3.5 text-base font-bold tracking-wide">
+        {pending ? (
+          'Joining the family…'
+        ) : (
+          <>
+            <UserPlus size={17} />
+            Join the family
+          </>
+        )}
       </Button>
     </form>
   )

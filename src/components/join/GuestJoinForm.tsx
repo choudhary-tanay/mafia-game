@@ -20,7 +20,7 @@ export default function GuestJoinForm({
   return (
     <form action={action} className="flex flex-col gap-3">
       {state?.generalError && (
-        <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+        <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400 animate-shake">
           {state.generalError}
         </p>
       )}
@@ -37,7 +37,7 @@ export default function GuestJoinForm({
             placeholder="ABCD12"
             maxLength={6}
             autoComplete="off"
-            className="rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm font-mono uppercase tracking-widest text-text-primary placeholder:text-text-faint focus:outline-none focus:border-border-bright focus:ring-1 focus:ring-border-bright transition-all"
+            className="rounded-xl border border-border bg-surface-raised px-4 py-3.5 text-lg font-mono uppercase tracking-widest text-center text-text-primary placeholder:text-text-faint focus:outline-none focus:border-border-bright focus:ring-1 focus:ring-border-bright transition-all"
           />
           {state?.errors?.code?.[0] && (
             <p className="text-xs text-red-400">{state.errors.code[0]}</p>
@@ -59,7 +59,7 @@ export default function GuestJoinForm({
           defaultValue={prefillName}
           maxLength={24}
           autoComplete="off"
-          className="rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary placeholder:text-text-faint focus:outline-none focus:border-border-bright focus:ring-1 focus:ring-border-bright transition-all"
+          className="rounded-xl border border-border bg-surface-raised px-4 py-3.5 text-base text-text-primary placeholder:text-text-faint focus:outline-none focus:border-border-bright focus:ring-1 focus:ring-border-bright transition-all"
         />
         {state?.errors?.displayName?.[0] && (
           <p className="text-xs text-red-400">{state.errors.displayName[0]}</p>
@@ -69,12 +69,12 @@ export default function GuestJoinForm({
       <button
         type="submit"
         disabled={pending}
-        className="flex items-center justify-center gap-2 rounded-xl border border-border bg-surface-raised px-4 py-3 text-sm font-semibold text-text-primary hover:bg-surface-high hover:border-border-bright disabled:opacity-60 disabled:cursor-not-allowed transition-all"
+        className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-border bg-surface-raised px-4 py-3.5 text-sm font-semibold text-text-primary hover:bg-surface-high hover:border-border-bright disabled:opacity-60 disabled:cursor-not-allowed transition-all"
       >
         {pending ? (
           <>
             <Loader2 size={16} className="animate-spin" />
-            Joining…
+            Opening the village gates…
           </>
         ) : (
           <>

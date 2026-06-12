@@ -1,16 +1,37 @@
 'use client'
 
 import { useState } from 'react'
-import { BookOpen, Target, Moon, Lightbulb, Trophy } from 'lucide-react'
+import { BookOpen, Target, Moon, Lightbulb, Trophy, Sun, MessageCircle, Scale } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
+import {
+  MafiaMask,
+  DoctorShield,
+  DetectiveGlass,
+  VillagerGroup,
+  MoonScene,
+  BallotBox,
+  TrophyIcon,
+  SecretDoor,
+} from '@/components/ui/illustrations'
 
-const ROLES = [
+type IllustrationProps = { className?: string; size?: number }
+
+const ROLES: {
+  name: string
+  color: string
+  border: string
+  bg: string
+  Art: (props: IllustrationProps) => React.ReactNode
+  ability: string
+  goal: string
+  tip: string
+}[] = [
   {
     name: 'Mafia',
     color: 'text-red-400',
     border: 'border-red-900/50',
     bg: 'bg-red-950/20',
-    icon: '🔴',
+    Art: MafiaMask,
     ability: 'Each night, secretly choose one player to eliminate.',
     goal: 'Equal or outnumber the village.',
     tip: 'Blend in during discussions. Never look too eager to vote.',
@@ -20,7 +41,7 @@ const ROLES = [
     color: 'text-cyan-400',
     border: 'border-cyan-900/50',
     bg: 'bg-cyan-950/20',
-    icon: '💊',
+    Art: DoctorShield,
     ability: 'Each night, choose one player to protect from elimination.',
     goal: 'Help the village eliminate all Mafia.',
     tip: 'You can protect yourself. Watch who Mafia might target.',
@@ -30,7 +51,7 @@ const ROLES = [
     color: 'text-purple-400',
     border: 'border-purple-900/50',
     bg: 'bg-purple-950/20',
-    icon: '🔍',
+    Art: DetectiveGlass,
     ability: 'Each night, investigate one player — you learn if they are Mafia.',
     goal: 'Use your knowledge to guide the village.',
     tip: 'Share findings carefully. The Mafia may try to eliminate you.',
@@ -40,10 +61,42 @@ const ROLES = [
     color: 'text-emerald-400',
     border: 'border-emerald-900/50',
     bg: 'bg-emerald-950/20',
-    icon: '👥',
+    Art: VillagerGroup,
     ability: 'No night action.',
     goal: 'Vote out all Mafia during the day.',
     tip: 'Observe who acts suspicious. Your vote is your power.',
+  },
+]
+
+const FLOW: {
+  phase: string
+  art: React.ReactNode
+  text: string
+}[] = [
+  {
+    phase: 'Role Reveal',
+    art: <SecretDoor size={20} className="text-gold" />,
+    text: 'Secret roles are assigned. Only you see your role.',
+  },
+  {
+    phase: 'Night',
+    art: <MoonScene size={20} className="text-blue-300" />,
+    text: 'Mafia chooses a target. Doctor protects someone. Detective investigates.',
+  },
+  {
+    phase: 'Morning',
+    art: <Sun size={18} className="text-amber-300" aria-hidden="true" />,
+    text: 'The night result is revealed — someone may have died, or been saved.',
+  },
+  {
+    phase: 'Discussion',
+    art: <MessageCircle size={18} className="text-text-muted" aria-hidden="true" />,
+    text: 'Everyone talks. Debate, accuse, defend. Find the Mafia.',
+  },
+  {
+    phase: 'Voting',
+    art: <BallotBox size={20} className="text-red-400" />,
+    text: 'All alive players vote to eliminate one person, or abstain.',
   },
 ]
 
@@ -54,7 +107,7 @@ export default function RulesButton() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-text-muted hover:text-text-primary hover:bg-surface-raised hover:border-border-bright transition-all"
+        className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 min-h-9 text-xs text-text-muted hover:text-text-primary hover:bg-surface-raised hover:border-border-bright transition-all"
         aria-label="How to play"
       >
         <BookOpen size={13} />
@@ -66,7 +119,7 @@ export default function RulesButton() {
 
           {/* Quick summary */}
           <section className="rounded-xl border border-border bg-surface-raised p-4 space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-3 flex items-center gap-2">
+            <p className="text-xs font-semibold uppercase tracking-widest text-gold mb-3 flex items-center gap-2">
               <Lightbulb size={12} />
               Quick rules
             </p>
@@ -91,43 +144,40 @@ export default function RulesButton() {
 
           {/* Roles */}
           <section>
-            <p className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
+            <p className="text-xs font-semibold uppercase tracking-widest text-gold mb-4 flex items-center gap-2">
               <Target size={12} />
               Roles
             </p>
             <div className="space-y-3">
-              {ROLES.map((r) => (
-                <div key={r.name} className={`rounded-xl border ${r.border} ${r.bg} p-4`}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-xl">{r.icon}</span>
-                    <p className={`font-bold text-base ${r.color}`}>{r.name}</p>
+              {ROLES.map((r) => {
+                const Art = r.Art
+                return (
+                  <div key={r.name} className={`rounded-xl border ${r.border} ${r.bg} p-4`}>
+                    <div className={`flex items-center gap-3 mb-2 ${r.color}`}>
+                      <Art size={26} />
+                      <p className={`font-display text-2xl leading-none tracking-wide ${r.color}`}>{r.name}</p>
+                    </div>
+                    <div className="space-y-1.5 text-xs">
+                      <p className="text-text-primary"><span className="text-text-muted">Ability: </span>{r.ability}</p>
+                      <p className="text-text-muted"><span className="font-medium text-text-primary">Goal: </span>{r.goal}</p>
+                      <p className="text-text-faint border-t border-border/50 pt-1.5 mt-1.5"><span className="text-text-muted">Tip: </span>{r.tip}</p>
+                    </div>
                   </div>
-                  <div className="space-y-1.5 text-xs">
-                    <p className="text-text-primary"><span className="text-text-muted">Ability: </span>{r.ability}</p>
-                    <p className="text-text-muted"><span className="font-medium text-text-primary">Goal: </span>{r.goal}</p>
-                    <p className="text-text-faint border-t border-border/50 pt-1.5 mt-1.5"><span className="text-text-muted">Tip: </span>{r.tip}</p>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </section>
 
           {/* Game flow */}
           <section>
-            <p className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
+            <p className="text-xs font-semibold uppercase tracking-widest text-gold mb-4 flex items-center gap-2">
               <Moon size={12} />
               Game flow
             </p>
             <div className="space-y-3">
-              {[
-                { phase: 'Role Reveal', icon: '🎭', text: 'Secret roles are assigned. Only you see your role.' },
-                { phase: 'Night', icon: '🌙', text: 'Mafia chooses a target. Doctor protects someone. Detective investigates.' },
-                { phase: 'Morning', icon: '☀️', text: 'The night result is revealed — someone may have died, or been saved.' },
-                { phase: 'Discussion', icon: '💬', text: 'Everyone talks. Debate, accuse, defend. Find the Mafia.' },
-                { phase: 'Voting', icon: '🗳️', text: 'All alive players vote to eliminate one person, or abstain.' },
-              ].map((item) => (
-                <div key={item.phase} className="flex items-start gap-3 p-3 rounded-xl bg-surface-raised">
-                  <span className="text-lg leading-none">{item.icon}</span>
+              {FLOW.map((item) => (
+                <div key={item.phase} className="flex items-start gap-3 p-3 rounded-xl border border-border/60 bg-surface-raised">
+                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center leading-none">{item.art}</span>
                   <div>
                     <p className="font-semibold text-text-primary text-xs uppercase tracking-wider mb-0.5">{item.phase}</p>
                     <p className="text-text-muted text-xs leading-relaxed">{item.text}</p>
@@ -139,21 +189,30 @@ export default function RulesButton() {
 
           {/* Win conditions */}
           <section>
-            <p className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
+            <p className="text-xs font-semibold uppercase tracking-widest text-gold mb-4 flex items-center gap-2">
               <Trophy size={12} />
               Win conditions
             </p>
             <div className="space-y-2.5">
               <div className="rounded-xl border border-emerald-800/40 bg-emerald-950/20 p-4">
-                <p className="font-bold text-emerald-400 mb-1">🏆 Village wins</p>
+                <p className="flex items-center gap-2 font-bold text-emerald-400 mb-1">
+                  <TrophyIcon size={16} className="text-emerald-400" />
+                  Village wins
+                </p>
                 <p className="text-text-muted text-xs">When all Mafia players are eliminated from the game.</p>
               </div>
               <div className="rounded-xl border border-red-800/40 bg-red-950/20 p-4">
-                <p className="font-bold text-red-400 mb-1">🔴 Mafia wins</p>
+                <p className="flex items-center gap-2 font-bold text-red-400 mb-1">
+                  <MafiaMask size={18} className="text-red-400" />
+                  Mafia wins
+                </p>
                 <p className="text-text-muted text-xs">When Mafia players equal or outnumber the remaining village.</p>
               </div>
               <div className="rounded-xl border border-border bg-surface-raised p-4">
-                <p className="font-bold text-text-primary mb-1">🤝 Ties</p>
+                <p className="flex items-center gap-2 font-bold text-text-primary mb-1">
+                  <Scale size={14} className="text-text-muted" aria-hidden="true" />
+                  Ties
+                </p>
                 <p className="text-text-muted text-xs">If the vote is tied, no one is eliminated that round.</p>
               </div>
             </div>

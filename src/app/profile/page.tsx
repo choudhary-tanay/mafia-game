@@ -4,6 +4,8 @@ import { getSession } from '@/lib/session'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logout } from '@/app/actions/auth'
 import Button from '@/components/ui/Button'
+import EmptyState from '@/components/ui/EmptyState'
+import { VillagerGroup } from '@/components/ui/illustrations'
 
 export const metadata = { title: 'Profile — Mafia' }
 
@@ -112,7 +114,7 @@ export default async function ProfilePage() {
               {user.full_name.charAt(0).toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
-              <h1 className="text-xl font-bold text-text-primary truncate">{user.full_name}</h1>
+              <h1 className="font-display text-3xl tracking-wide text-text-primary truncate">{user.full_name}</h1>
               <p className="text-sm text-text-muted truncate">{user.email}</p>
               <p className="text-xs text-text-muted mt-0.5">
                 {user.sex === 'PREFER_NOT_TO_SAY' ? 'Prefer not to say' : user.sex?.charAt(0) + user.sex?.slice(1).toLowerCase()}
@@ -239,8 +241,12 @@ export default async function ProfilePage() {
           )}
 
           {recentGames?.length === 0 && (
-            <div className="rounded-xl border border-border bg-surface p-8 text-center text-sm text-text-muted animate-fade-up">
-              No games played yet. Create or join a room to get started!
+            <div className="rounded-xl border border-border bg-surface animate-fade-up">
+              <EmptyState
+                icon={<VillagerGroup size={56} />}
+                title="No games played yet."
+                hint="Create or join a room — the village is waiting for you."
+              />
             </div>
           )}
 
@@ -252,7 +258,7 @@ export default async function ProfilePage() {
 
 function StatTile({ icon, label, value, accent = false }: { icon: string; label: string; value: number | string; accent?: boolean }) {
   return (
-    <div className={`rounded-xl border p-4 ${accent ? 'border-accent/30 bg-accent/5' : 'border-border bg-surface'}`}>
+    <div className={`rounded-xl border p-4 transition-colors ${accent ? 'border-accent/30 bg-accent/5 hover:border-accent/50' : 'border-border bg-surface hover:border-border-bright'}`}>
       <p className="text-xs text-text-muted flex items-center gap-1">{icon} {label}</p>
       <p className={`mt-1 text-2xl font-bold tabular-nums ${accent ? 'text-accent' : 'text-text-primary'}`}>{value}</p>
     </div>

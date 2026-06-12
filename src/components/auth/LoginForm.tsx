@@ -12,7 +12,7 @@ export default function LoginForm() {
   return (
     <form action={action} className="flex flex-col gap-5">
       {state?.generalError && (
-        <div className="rounded-xl border border-red-700/40 bg-red-950/30 px-4 py-3 text-sm text-red-300">
+        <div className="animate-shake rounded-xl border border-red-700/40 bg-red-950/30 px-4 py-3 text-sm text-red-300">
           ⚠ {state.generalError}
         </div>
       )}
@@ -36,9 +36,15 @@ export default function LoginForm() {
         error={state?.errors?.password?.[0]}
       />
 
-      <Button type="submit" loading={pending} className="mt-1 w-full py-3 text-base">
-        <LogIn size={17} />
-        Sign in
+      <Button type="submit" loading={pending} className="mt-1 w-full min-h-12 py-3.5 text-base font-bold tracking-wide">
+        {pending ? (
+          'Opening the village gates…'
+        ) : (
+          <>
+            <LogIn size={17} />
+            Enter the village
+          </>
+        )}
       </Button>
     </form>
   )

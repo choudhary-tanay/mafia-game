@@ -6,7 +6,8 @@ import { beginNight } from '@/app/actions/game'
 import { getBrowserClient } from '@/lib/supabase/client'
 import type { Role } from '@/types/database'
 import Button from '@/components/ui/Button'
-import { Play, Users } from 'lucide-react'
+import { Play, Users, Lock } from 'lucide-react'
+import { MafiaMask, DoctorShield, DetectiveGlass, VillagerGroup, MoonScene } from '@/components/ui/illustrations'
 
 type Props = {
   role: Role
@@ -16,10 +17,13 @@ type Props = {
   isHost: boolean
 }
 
+type IllustrationProps = { className?: string; size?: number }
+
 const ROLE_CONFIG: Record<Role, {
   label: string
-  symbol: string
+  Art: (props: IllustrationProps) => React.ReactNode
   tagline: string
+  objective: string
   description: string
   color: string
   textColor: string
@@ -27,12 +31,14 @@ const ROLE_CONFIG: Record<Role, {
   bg: string
   gradient: string
   button: string
-  glow: string
+  roleGlow: string
+  nameGlow: string
 }> = {
   MAFIA: {
     label: 'Mafia',
-    symbol: '🔴',
+    Art: MafiaMask,
     tagline: 'Eliminate the village. Stay hidden.',
+    objective: 'Objective: outlast the village.',
     description: 'Each night, you and your Mafia team secretly choose one player to eliminate. During the day, blend in with the village. Mislead, deflect, survive.',
     color: 'text-red-400',
     textColor: 'text-red-300',
@@ -40,12 +46,14 @@ const ROLE_CONFIG: Record<Role, {
     bg: 'bg-red-950/30',
     gradient: 'bg-gradient-to-b from-red-950/60 via-red-950/30 to-transparent',
     button: 'bg-red-700 hover:bg-red-600 text-white shadow-lg shadow-red-900/40',
-    glow: 'shadow-red-900/30',
+    roleGlow: 'role-glow-mafia',
+    nameGlow: 'text-glow-red',
   },
   DOCTOR: {
     label: 'Doctor',
-    symbol: '💊',
+    Art: DoctorShield,
     tagline: 'Protect one player each night.',
+    objective: 'Objective: find and eliminate the Mafia.',
     description: 'Each night, choose one player to save. If the Mafia targets them, they survive. You can protect yourself — use that choice wisely.',
     color: 'text-cyan-400',
     textColor: 'text-cyan-300',
@@ -53,12 +61,14 @@ const ROLE_CONFIG: Record<Role, {
     bg: 'bg-cyan-950/20',
     gradient: 'bg-gradient-to-b from-cyan-950/50 via-cyan-950/20 to-transparent',
     button: 'bg-cyan-700 hover:bg-cyan-600 text-white shadow-lg shadow-cyan-900/40',
-    glow: 'shadow-cyan-900/20',
+    roleGlow: 'role-glow-doctor',
+    nameGlow: '[text-shadow:0_0_28px_rgba(34,211,238,0.45),0_0_60px_rgba(34,211,238,0.18)]',
   },
   DETECTIVE: {
     label: 'Detective',
-    symbol: '🔍',
+    Art: DetectiveGlass,
     tagline: 'Investigate and expose the hidden enemy.',
+    objective: 'Objective: find and eliminate the Mafia.',
     description: 'Each night, choose a player to investigate. You will learn if they are Mafia or not. Use this knowledge carefully — the Mafia will try to silence you.',
     color: 'text-purple-400',
     textColor: 'text-purple-300',
@@ -66,12 +76,14 @@ const ROLE_CONFIG: Record<Role, {
     bg: 'bg-purple-950/20',
     gradient: 'bg-gradient-to-b from-purple-950/50 via-purple-950/20 to-transparent',
     button: 'bg-purple-700 hover:bg-purple-600 text-white shadow-lg shadow-purple-900/40',
-    glow: 'shadow-purple-900/20',
+    roleGlow: 'role-glow-detective',
+    nameGlow: '[text-shadow:0_0_28px_rgba(192,132,252,0.45),0_0_60px_rgba(192,132,252,0.18)]',
   },
   VILLAGER: {
     label: 'Villager',
-    symbol: '👥',
+    Art: VillagerGroup,
     tagline: 'Discuss, doubt, and vote wisely.',
+    objective: 'Objective: find and eliminate the Mafia.',
     description: 'You have no night ability. Your power lies in observation, discussion, and your vote. Pay attention to who acts suspicious. Your voice matters.',
     color: 'text-emerald-400',
     textColor: 'text-emerald-300',
@@ -79,7 +91,8 @@ const ROLE_CONFIG: Record<Role, {
     bg: 'bg-emerald-950/20',
     gradient: 'bg-gradient-to-b from-emerald-950/50 via-emerald-950/20 to-transparent',
     button: 'bg-emerald-700 hover:bg-emerald-600 text-white shadow-lg shadow-emerald-900/40',
-    glow: 'shadow-emerald-900/20',
+    roleGlow: 'role-glow-villager',
+    nameGlow: '[text-shadow:0_0_28px_rgba(52,211,153,0.45),0_0_60px_rgba(52,211,153,0.18)]',
   },
 }
 
@@ -87,6 +100,7 @@ export default function RoleRevealCard({ role, mafiaTeammates, players, gameId, 
   const [acknowledged, setAcknowledged] = useState(false)
   const router = useRouter()
   const cfg = ROLE_CONFIG[role]
+  const Art = cfg.Art
 
   // Always poll/subscribe so the page swaps to GameView once Night 1 begins
   useEffect(() => {
@@ -104,40 +118,46 @@ export default function RoleRevealCard({ role, mafiaTeammates, players, gameId, 
 
   if (!acknowledged) {
     return (
-      <div className="flex flex-1 items-center justify-center px-4 py-12">
-        <div className="w-full max-w-md">
-          {/* Top glow */}
-          <div className={`absolute inset-0 pointer-events-none`}>
-            <div className={`absolute inset-0 bg-[radial-gradient(ellipse_50%_40%_at_50%_20%,var(--accent-glow),transparent)]`} />
-          </div>
+      <div className="relative flex flex-1 items-center justify-center overflow-hidden px-4 py-12 vignette">
+        {/* Atmosphere */}
+        <div className="fog-layer" aria-hidden="true" />
+        <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_50%_40%_at_50%_20%,var(--accent-glow),transparent)]" />
+        </div>
 
+        <div className="relative w-full max-w-md">
           {/* Role card */}
           <div
-            className={`relative rounded-3xl border-2 ${cfg.border} ${cfg.bg} overflow-hidden shadow-2xl ${cfg.glow} animate-card-reveal`}
+            className={`relative rounded-3xl border-2 ${cfg.border} ${cfg.bg} overflow-hidden shadow-2xl ${cfg.roleGlow} animate-flip-in`}
           >
             {/* Gradient top */}
-            <div className={`absolute inset-x-0 top-0 h-40 ${cfg.gradient} pointer-events-none`} />
+            <div className={`absolute inset-x-0 top-0 h-44 ${cfg.gradient} pointer-events-none`} />
 
             {/* Content */}
             <div className="relative px-8 py-10 text-center">
               {/* Preamble */}
-              <p className={`text-xs font-bold uppercase tracking-[0.25em] ${cfg.textColor} mb-6 opacity-80`}>
+              <p className={`text-xs font-bold uppercase tracking-[0.3em] ${cfg.textColor} mb-7 opacity-80`}>
                 Your secret role
               </p>
 
-              {/* Role symbol */}
-              <div className={`text-7xl mb-4 animate-float`}>
-                {cfg.symbol}
+              {/* Role illustration */}
+              <div className={`mb-5 flex justify-center ${cfg.color} animate-float`}>
+                <Art size={84} className="drop-shadow-[0_0_24px_currentColor]" />
               </div>
 
               {/* Role name */}
-              <h1 className={`text-5xl font-black tracking-tight mb-3 ${cfg.color}`}>
+              <h1 className={`font-display text-6xl sm:text-7xl leading-none tracking-wide mb-3 ${cfg.color} ${cfg.nameGlow}`}>
                 {cfg.label}
               </h1>
 
               {/* Tagline */}
-              <p className={`text-base font-semibold mb-1 ${cfg.textColor}`}>
+              <p className={`text-base font-semibold mb-1.5 ${cfg.textColor}`}>
                 {cfg.tagline}
+              </p>
+
+              {/* Team objective */}
+              <p className={`text-[11px] font-bold uppercase tracking-[0.18em] ${cfg.color} opacity-90`}>
+                {cfg.objective}
               </p>
 
               {/* Divider */}
@@ -172,14 +192,15 @@ export default function RoleRevealCard({ role, mafiaTeammates, players, gameId, 
               )}
 
               {/* Privacy note */}
-              <p className="text-xs text-text-faint mb-6">
-                🔒 Keep your role secret. Never share this screen.
+              <p className="mb-6 flex items-center justify-center gap-1.5 text-xs text-text-faint">
+                <Lock size={11} aria-hidden="true" />
+                Keep your role secret. Never share this screen.
               </p>
 
               {/* Acknowledge button */}
               <button
                 onClick={() => setAcknowledged(true)}
-                className={`w-full rounded-2xl py-4 text-base font-black text-white transition-all ${cfg.button}`}
+                className={`w-full rounded-2xl py-4 min-h-[44px] text-base font-black text-white transition-all ${cfg.button}`}
               >
                 I understand my role
               </button>
@@ -196,21 +217,24 @@ export default function RoleRevealCard({ role, mafiaTeammates, players, gameId, 
       {/* Header */}
       <header className="border-b border-border bg-surface/90 backdrop-blur-sm px-6 py-4">
         <div className="mx-auto flex max-w-3xl items-center justify-between">
-          <span className="font-black text-text-primary">Mafia</span>
-          <div className={`flex items-center gap-2 rounded-full border ${cfg.border} ${cfg.bg} px-4 py-1.5`}>
-            <span>{cfg.symbol}</span>
+          <span className="font-display text-xl tracking-wider text-text-primary">Mafia</span>
+          <div className={`flex items-center gap-2 rounded-full border ${cfg.border} ${cfg.bg} px-4 py-1.5 ${cfg.color}`}>
+            <Art size={16} />
             <span className={`text-sm font-bold ${cfg.color}`}>{cfg.label}</span>
           </div>
         </div>
       </header>
 
-      <main className="flex-1 px-4 py-8 sm:py-12">
-        <div className="mx-auto max-w-2xl space-y-6">
+      <main className="relative flex-1 overflow-hidden px-4 py-8 sm:py-12 vignette">
+        <div className="fog-layer" aria-hidden="true" />
+        <div className="relative mx-auto max-w-2xl space-y-6">
 
           {/* Status */}
-          <div className={`rounded-2xl border ${cfg.border} ${cfg.bg} p-6 text-center`}>
-            <div className="text-4xl mb-3">{cfg.symbol}</div>
-            <h1 className="text-xl font-bold text-text-primary mb-2">
+          <div className={`relative overflow-hidden rounded-2xl border ${cfg.border} ${cfg.bg} p-6 text-center animate-fade-up`}>
+            <div className="mb-4 flex justify-center text-blue-300 animate-float">
+              <MoonScene size={48} className="drop-shadow-[0_0_18px_currentColor]" />
+            </div>
+            <h1 className="font-display text-3xl tracking-wide text-text-primary mb-2">
               Waiting to begin
             </h1>
             <p className="text-sm text-text-muted">
@@ -222,9 +246,9 @@ export default function RoleRevealCard({ role, mafiaTeammates, players, gameId, 
                   You are the host. Begin Night 1 when everyone is ready.
                 </p>
                 <form action={beginNight.bind(null, gameId)}>
-                  <Button type="submit" className="px-8 py-3 font-bold text-base">
+                  <Button type="submit" className="px-8 py-3 min-h-[44px] font-bold text-base animate-breathe">
                     <Play size={16} />
-                    Begin Night 1
+                    Start The Night
                   </Button>
                 </form>
               </div>
@@ -237,7 +261,7 @@ export default function RoleRevealCard({ role, mafiaTeammates, players, gameId, 
           </div>
 
           {/* Player list */}
-          <div className="rounded-xl border border-border bg-surface p-5">
+          <div className="rounded-xl border border-border bg-surface/80 backdrop-blur-sm p-5 animate-fade-up stagger-2">
             <div className="flex items-center gap-2 mb-4">
               <Users size={15} className="text-text-muted" />
               <h2 className="text-sm font-bold uppercase tracking-widest text-text-muted">
@@ -254,7 +278,7 @@ export default function RoleRevealCard({ role, mafiaTeammates, players, gameId, 
                 return (
                   <div
                     key={p.userId}
-                    className={`flex items-center gap-2.5 rounded-xl p-3 ${
+                    className={`flex items-center gap-2.5 rounded-xl p-3 animate-pop-in stagger-${Math.min(i + 1, 8)} ${
                       p.isMe ? 'border border-accent/30 bg-accent/5' : 'bg-surface-raised'
                     }`}
                   >

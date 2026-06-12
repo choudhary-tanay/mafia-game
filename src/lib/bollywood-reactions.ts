@@ -192,7 +192,11 @@ export function computeBollywoodEvents(ctx: ComputeCtx): BollywoodEvent[] {
         if (totalDeaths === 1) push('15', ann.id)
 
         const isMyElimination = ann.target_player_id === ctx.myStableId
-        const isMafiaEliminated = targetRole === 'MAFIA'
+        // targetRole is stripped server-side when revealRoleOnDeath is off, so
+        // for our own elimination fall back to ctx.myRole — otherwise an
+        // eliminated Mafia would be routed into the "wrong player" branch.
+        const isMafiaEliminated =
+          targetRole === 'MAFIA' || (isMyElimination && ctx.myRole === 'MAFIA')
 
         if (isMafiaEliminated) {
           // Correct elimination — village success reactions
@@ -215,14 +219,15 @@ export function computeBollywoodEvents(ctx: ComputeCtx): BollywoodEvent[] {
           // Scenario 10: Private — only to the eliminated non-Mafia player
           if (isMyElimination) push('10', ann.id)
 
-          // Scenario 26/27: specific role eliminated by vote
-          if (ctx.revealRoleOnDeath || isMyElimination) {
-            if (targetRole === 'DOCTOR') push('26', ann.id)
-            else if (targetRole === 'DETECTIVE') push('27', ann.id)
-          } else if (isMyElimination) {
-            // Private to eliminated player regardless of reveal setting
+          // Scenario 26/27: specific role eliminated by vote.
+          // My own elimination uses myRole (targetRole may be stripped);
+          // otherwise the role is only known when revealRoleOnDeath is on.
+          if (isMyElimination) {
             if (ctx.myRole === 'DOCTOR') push('26', ann.id)
             else if (ctx.myRole === 'DETECTIVE') push('27', ann.id)
+          } else if (ctx.revealRoleOnDeath && targetRole) {
+            if (targetRole === 'DOCTOR') push('26', ann.id)
+            else if (targetRole === 'DETECTIVE') push('27', ann.id)
           }
 
           // Scenario 28: unanimous vote even for wrong target

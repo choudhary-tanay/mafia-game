@@ -81,10 +81,47 @@ export type GameRow = {
   current_round_number: number
   winning_team: string | null
   phase_deadline: string | null
+  // Phase 11 — pause/resume (columns added by supabase-phase11.sql)
+  is_paused: boolean
+  paused_at: string | null
+  paused_by_player_id: string | null
+  remaining_phase_seconds: number | null
   started_at: string
   ended_at: string | null
   created_at: string
   updated_at: string
+}
+
+// ─── Phase 11 — Game History types ───────────────────────────────────────────
+
+export type HistoryNightAction = {
+  type: 'MAFIA_KILL' | 'DOCTOR_SAVE' | 'DETECTIVE_CHECK'
+  actorName: string
+  targetName: string
+  isMafia?: boolean  // only present for DETECTIVE_CHECK
+}
+
+export type HistoryVote = {
+  voterName: string
+  targetName: string | null  // null = abstain
+}
+
+export type GameHistoryRound = {
+  roundNumber: number
+  nightActions: HistoryNightAction[]
+  died: string | null
+  saved: boolean
+  nightResultMsg: string
+  votes: HistoryVote[]
+  eliminated: string | null
+  eliminatedRole: Role | null
+  voteResultMsg: string
+}
+
+export type GameHistory = {
+  rounds: GameHistoryRound[]
+  finalRoles: { name: string; role: Role; survived: boolean }[]
+  winner: string
 }
 
 export type GamePlayerRow = {

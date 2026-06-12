@@ -264,6 +264,9 @@ export async function submitNightAction(
   if (isDeadlinePassed(game.phase_deadline))
     return { error: 'Night phase has ended.' }
 
+  const nightPaused = await checkIfPaused(supabase, gameId)
+  if (nightPaused) return { error: 'The game is paused. Resume the game before taking action.' }
+
   const { data: me } = await supabase
     .from('game_players')
     .select('role, is_alive')
@@ -382,6 +385,9 @@ export async function submitVote(
   if (isDeadlinePassed(game.phase_deadline))
     return { error: 'Voting has ended.' }
 
+  const votePaused = await checkIfPaused(supabase, gameId)
+  if (votePaused) return { error: 'The game is paused. Resume the game before taking action.' }
+
   const { data: me } = await supabase
     .from('game_players')
     .select('is_alive')
@@ -470,6 +476,128 @@ export async function submitVote(
   return {}
 }
 
+// Safe pause-state probe — returns false if the is_paused column hasn't been
+// migrated yet (column-not-found returns data=null, which we treat as false).
+async function checkIfPaused(
+  supabase: ReturnType<typeof createServiceClient>,
+  gameId: string,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from('games')
+    .select('is_paused')
+    .eq('id', gameId)
+    .maybeSingle()
+  return (data as { is_paused?: boolean | null } | null)?.is_paused === true
+}
+
+// ─── Phase 11: Pause / Resume ─────────────────────────────────────────────────
+
+export async function pauseGame(gameId: string): Promise<{ error?: string }> {
+  const identity = await getPlayerIdentity()
+  if (!identity) return { error: 'Not authenticated.' }
+  const supabase = createServiceClient()
+
+  const { data: game } = await supabase
+    .from('games')
+    .select('id, room_id, current_phase, phase_deadline')
+    .eq('id', gameId)
+    .maybeSingle()
+
+  if (!game) return { error: 'Game not found.' }
+  if (game.current_phase === 'GAME_OVER') return { error: 'Game is already over.' }
+  // Refuse to pause once the deadline has passed: storing remaining=0 and a
+  // null deadline would leave the phase unable to ever auto-advance on resume.
+  if (isDeadlinePassed(game.phase_deadline))
+    return { error: 'This phase is already ending. Wait a moment and try again.' }
+
+  const alreadyPaused = await checkIfPaused(supabase, gameId)
+  if (alreadyPaused) return { error: 'Game is already paused.' }
+
+  const { data: room } = await supabase
+    .from('rooms')
+    .select('host_user_id, host_guest_id')
+    .eq('id', game.room_id)
+    .single()
+
+  const isHost =
+    (identity.userId  && room?.host_user_id  === identity.userId) ||
+    (identity.guestId && room?.host_guest_id === identity.guestId)
+  if (!isHost) return { error: 'Only the host can pause the game.' }
+
+  const remaining = game.phase_deadline
+    ? Math.max(0, Math.ceil((new Date(game.phase_deadline).getTime() - Date.now()) / 1000))
+    : null
+
+  const pauserId = identity.userId ?? identity.guestId ?? null
+
+  await supabase
+    .from('games')
+    .update({
+      is_paused: true,
+      paused_at: new Date().toISOString(),
+      paused_by_player_id: pauserId,
+      remaining_phase_seconds: remaining,
+      phase_deadline: null,
+    })
+    .eq('id', gameId)
+
+  await broadcastGameUpdate(gameId, 'game_paused', { pausedBy: pauserId })
+  revalidatePath(`/game/${gameId}`)
+  return {}
+}
+
+export async function resumeGame(gameId: string): Promise<{ error?: string }> {
+  const identity = await getPlayerIdentity()
+  if (!identity) return { error: 'Not authenticated.' }
+  const supabase = createServiceClient()
+
+  const { data: game } = await supabase
+    .from('games')
+    .select('id, room_id, current_phase, remaining_phase_seconds')
+    .eq('id', gameId)
+    .maybeSingle()
+
+  if (!game) return { error: 'Game not found.' }
+
+  const isPaused = await checkIfPaused(supabase, gameId)
+  if (!isPaused) return { error: 'Game is not paused.' }
+
+  const { data: room } = await supabase
+    .from('rooms')
+    .select('host_user_id, host_guest_id')
+    .eq('id', game.room_id)
+    .single()
+
+  const isHost =
+    (identity.userId  && room?.host_user_id  === identity.userId) ||
+    (identity.guestId && room?.host_guest_id === identity.guestId)
+  if (!isHost) return { error: 'Only the host can resume the game.' }
+
+  // A timed phase must always come back with a live deadline — clamp to a 5s
+  // minimum grace so the phase can still auto-advance (a null deadline would
+  // stall maybeAdvancePhase forever). Null remaining = phase had no timer.
+  const gameWithPause = game as typeof game & { remaining_phase_seconds?: number | null }
+  const newDeadline =
+    gameWithPause.remaining_phase_seconds !== null && gameWithPause.remaining_phase_seconds !== undefined
+      ? futureDeadline(Math.max(gameWithPause.remaining_phase_seconds, 5))
+      : null
+
+  await supabase
+    .from('games')
+    .update({
+      is_paused: false,
+      paused_at: null,
+      paused_by_player_id: null,
+      remaining_phase_seconds: null,
+      phase_deadline: newDeadline,
+    })
+    .eq('id', gameId)
+
+  await broadcastGameUpdate(gameId, 'game_resumed', {})
+  revalidatePath(`/game/${gameId}`)
+  return {}
+}
+
 // Called by the game page on every render — lazy deadline enforcement.
 // Returns true if a phase transition happened (triggers a re-render).
 export async function maybeAdvancePhase(gameId: string): Promise<boolean> {
@@ -482,6 +610,11 @@ export async function maybeAdvancePhase(gameId: string): Promise<boolean> {
     .maybeSingle()
 
   if (!game) return false
+
+  // Don't auto-advance while game is paused.
+  const isPaused = await checkIfPaused(supabase, gameId)
+  if (isPaused) return false
+
   if (!isDeadlinePassed(game.phase_deadline)) return false
   const hasGuestColumns = await hasGuestPlayerColumns(supabase)
 

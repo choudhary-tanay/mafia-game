@@ -8,16 +8,16 @@ export default function LoginPage() {
     <div className="animate-fade-up">
       {/* Card header */}
       <div className="mb-8 text-center">
-        <h1 className="text-3xl font-black tracking-tight text-text-primary mb-2">
-          Welcome back
+        <h1 className="font-display text-4xl sm:text-5xl tracking-wider text-text-primary text-glow-red mb-2">
+          Enter the Village
         </h1>
         <p className="text-text-muted text-sm">
-          Return to the village and continue your record.
+          Sign in to pick up your record where you left it.
         </p>
       </div>
 
       {/* Form card */}
-      <div className="rounded-2xl border border-border bg-surface p-8 shadow-2xl">
+      <div className="glass-card noise-overlay relative rounded-2xl p-8 shadow-2xl">
         <LoginForm />
       </div>
 

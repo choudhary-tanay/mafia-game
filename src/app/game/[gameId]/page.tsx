@@ -8,9 +8,199 @@ import { getMyNightQuestionAnswer, getNightThoughts } from '@/app/actions/night-
 import { computeBollywoodEvents, type AnnExt } from '@/lib/bollywood-reactions'
 import RoleRevealCard from '@/components/game/RoleRevealCard'
 import GameView, { type GameViewProps } from '@/components/game/GameView'
-import type { GameRow, Role, PublicPlayer, Announcement } from '@/types/database'
+import type { GameRow, Role, PublicPlayer, Announcement, GameHistoryRound, GameHistory } from '@/types/database'
 
 export const metadata = { title: 'Game — Mafia' }
+
+// Build full game history for post-game recap (called only when GAME_OVER).
+// Queries night_actions and votes to reveal everything.
+async function buildGameHistory(
+  supabase: ReturnType<typeof createServiceClient>,
+  gameId: string,
+  players: PublicPlayer[],
+  hasGuestColumns: boolean,
+  winningTeam: string | null,
+  allAnnouncements: Announcement[],
+): Promise<GameHistory> {
+  const playerNameMap = new Map(players.map((p) => [p.user_id, p.display_name]))
+
+  // All rounds in order
+  const { data: roundsData } = await supabase
+    .from('rounds')
+    .select('id, round_number')
+    .eq('game_id', gameId)
+    .order('round_number', { ascending: true })
+
+  const rounds = (roundsData ?? []) as { id: string; round_number: number }[]
+
+  // All night actions
+  const { data: allNightActionsRaw } = await supabase
+    .from('night_actions')
+    .select(
+      hasGuestColumns
+        ? 'round_id, action_type, actor_user_id, actor_guest_id, target_user_id'
+        : 'round_id, action_type, actor_user_id, target_user_id',
+    )
+    .eq('game_id', gameId)
+  const allNightActions = (allNightActionsRaw ?? []) as unknown as {
+    round_id: string
+    action_type: string
+    actor_user_id: string | null
+    actor_guest_id?: string | null
+    target_user_id: string | null
+  }[]
+
+  // All votes
+  const { data: allVotesRaw } = await supabase
+    .from('votes')
+    .select(
+      hasGuestColumns
+        ? 'round_id, voter_user_id, voter_guest_id, target_user_id'
+        : 'round_id, voter_user_id, target_user_id',
+    )
+    .eq('game_id', gameId)
+  const allVotes = (allVotesRaw ?? []) as unknown as {
+    round_id: string
+    voter_user_id: string | null
+    voter_guest_id?: string | null
+    target_user_id: string | null
+  }[]
+
+  // Detective check results: gather from private events
+  const { data: detectiveEventsRaw } = await supabase
+    .from('game_events')
+    .select('round_id, target_player_id, message')
+    .eq('game_id', gameId)
+    .eq('event_type', 'DETECTIVE_INVESTIGATION')
+  const detectiveEvents = (detectiveEventsRaw ?? []) as {
+    round_id: string | null
+    target_player_id: string | null
+    message: string
+  }[]
+
+  // Public game events for night/vote result messages
+  const eventMsgByType = new Map<string, { round_id: string | null; message: string; target_player_id: string | null }[]>()
+  for (const ann of allAnnouncements) {
+    const evType = (ann as unknown as { event_type: string }).event_type
+    if (!eventMsgByType.has(evType)) eventMsgByType.set(evType, [])
+    eventMsgByType.get(evType)!.push({
+      round_id: (ann as unknown as { round_id?: string | null }).round_id ?? null,
+      message: ann.message,
+      target_player_id: (ann as unknown as { target_player_id?: string | null }).target_player_id ?? null,
+    })
+  }
+
+  function getActorName(a: { actor_user_id: string | null; actor_guest_id?: string | null }): string {
+    const id = a.actor_user_id ?? a.actor_guest_id
+    return id ? (playerNameMap.get(id) ?? 'Unknown') : 'Unknown'
+  }
+
+  function getTargetName(targetId: string | null): string {
+    return targetId ? (playerNameMap.get(targetId) ?? 'Unknown') : 'Unknown'
+  }
+
+  const historyRounds: GameHistoryRound[] = rounds.map((r) => {
+    const roundId = r.id
+    const roundNum = r.round_number
+
+    // Night actions for this round
+    const roundNightActions = allNightActions.filter((a) => a.round_id === roundId)
+
+    const killAction = roundNightActions.find((a) => a.action_type === 'MAFIA_KILL')
+    const saveAction = roundNightActions.find((a) => a.action_type === 'DOCTOR_SAVE')
+    const detectiveAction = roundNightActions.find((a) => a.action_type === 'DETECTIVE_CHECK')
+    const detectiveEvent = detectiveEvents.find((e) => e.round_id === roundId)
+
+    const nightActionsOut: GameHistoryRound['nightActions'] = []
+    if (killAction) {
+      nightActionsOut.push({
+        type: 'MAFIA_KILL',
+        actorName: getActorName(killAction),
+        targetName: getTargetName(killAction.target_user_id),
+      })
+    }
+    if (saveAction) {
+      nightActionsOut.push({
+        type: 'DOCTOR_SAVE',
+        actorName: getActorName(saveAction),
+        targetName: getTargetName(saveAction.target_user_id),
+      })
+    }
+    if (detectiveAction) {
+      const isMafia = !!(detectiveEvent?.message && detectiveEvent.message.includes('is MAFIA'))
+      nightActionsOut.push({
+        type: 'DETECTIVE_CHECK',
+        actorName: getActorName(detectiveAction),
+        targetName: getTargetName(detectiveAction.target_user_id),
+        isMafia,
+      })
+    }
+
+    // Find kill/save result from public events
+    const killed = (eventMsgByType.get('PLAYER_KILLED_BY_MAFIA') ?? []).find((e) => e.round_id === roundId)
+    const saved  = (eventMsgByType.get('PLAYER_SAVED_BY_DOCTOR')  ?? []).find((e) => e.round_id === roundId)
+    const quiet  = (eventMsgByType.get('NIGHT_QUIET') ?? []).find((e) => e.round_id === roundId)
+
+    const diedName = killed?.target_player_id ? (playerNameMap.get(killed.target_player_id) ?? null) : null
+    const wasSaved = !!saved
+
+    const nightResultMsg =
+      killed?.message ??
+      saved?.message ??
+      quiet?.message ??
+      'Night passed.'
+
+    // Votes for this round
+    const roundVotes = allVotes.filter((v) => v.round_id === roundId)
+    const voteDetails: GameHistoryRound['votes'] = roundVotes.map((v) => ({
+      voterName: getTargetName(v.voter_user_id ?? v.voter_guest_id ?? null),
+      targetName: v.target_user_id ? (playerNameMap.get(v.target_user_id) ?? v.target_user_id) : null,
+    }))
+
+    // Vote result
+    const eliminated = (eventMsgByType.get('PLAYER_ELIMINATED_BY_VOTE') ?? []).find((e) => e.round_id === roundId)
+    const tie        = (eventMsgByType.get('NO_ELIMINATION_TIE')         ?? []).find((e) => e.round_id === roundId)
+    const abstain    = (eventMsgByType.get('NO_ELIMINATION_ABSTAIN')      ?? []).find((e) => e.round_id === roundId)
+
+    const eliminatedPlayerId = eliminated?.target_player_id ?? null
+    const eliminatedPlayer = eliminatedPlayerId
+      ? players.find((p) => p.user_id === eliminatedPlayerId)
+      : null
+    const eliminatedName = eliminatedPlayer?.display_name ?? null
+    const eliminatedRole = eliminatedPlayer?.role ?? null
+
+    const voteResultMsg =
+      eliminated?.message ??
+      tie?.message ??
+      abstain?.message ??
+      (roundVotes.length > 0 ? 'Votes cast.' : '')
+
+    return {
+      roundNumber: roundNum,
+      nightActions: nightActionsOut,
+      died: diedName,
+      saved: wasSaved,
+      nightResultMsg,
+      votes: voteDetails,
+      eliminated: eliminatedName,
+      eliminatedRole: eliminatedRole as Role | null,
+      voteResultMsg,
+    }
+  })
+
+  // Final roles
+  const finalRoles = players.map((p) => ({
+    name: p.display_name,
+    role: (p.role ?? 'VILLAGER') as Role,
+    survived: p.is_alive,
+  }))
+
+  return {
+    rounds: historyRounds,
+    finalRoles,
+    winner: winningTeam ?? '',
+  }
+}
 
 export default async function GamePage({ params }: { params: Promise<{ gameId: string }> }) {
   const { gameId } = await params
@@ -39,8 +229,22 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
   if (!gameRaw) notFound()
   const game = gameRaw as GameRow
 
+  // ── Pause state (separate query — gracefully handles missing columns) ─────
+  const { data: pauseData, error: pauseErr } = await supabase
+    .from('games')
+    .select('is_paused, paused_by_player_id, remaining_phase_seconds')
+    .eq('id', gameId)
+    .maybeSingle()
+
+  const isPaused = !pauseErr && (pauseData as { is_paused?: boolean | null } | null)?.is_paused === true
+  const pausedByPlayerId = !pauseErr
+    ? (pauseData as { paused_by_player_id?: string | null } | null)?.paused_by_player_id ?? null
+    : null
+  const remainingPausedSecs = !pauseErr
+    ? (pauseData as { remaining_phase_seconds?: number | null } | null)?.remaining_phase_seconds ?? null
+    : null
+
   // ── My player ─────────────────────────────────────────────────────────────
-  // Support both authenticated (user_id) and guest (guest_id) players
   let myPlayerQuery = supabase
     .from('game_players')
     .select(hasGuestColumns ? 'role, is_alive, user_id, guest_id' : 'role, is_alive, user_id')
@@ -73,7 +277,6 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
     .select(gamePlayersSelect(hasGuestColumns))
     .eq('game_id', gameId)
 
-  // Build display names: prefer game_players.display_name (guests), else room_players lookup
   const { data: roomPlayers } = await supabase
     .from('room_players')
     .select(hasGuestColumns ? 'user_id, guest_id, display_name' : 'user_id, display_name')
@@ -92,7 +295,6 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
       : [],
   )
 
-  // Current player's stable ID for UI highlighting
   const myStableId = currentUserId ?? currentGuestId ?? ''
 
   const gamePlayerRows = (gamePlayers ?? []) as unknown as {
@@ -114,7 +316,6 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
       user_id: stableId ?? '',
       display_name: displayName,
       is_alive: gp.is_alive,
-      // Only expose role if dead AND reveal_role_on_death is enabled, OR game is over
       role:
         (!gp.is_alive && revealRoleOnDeath) || game.current_phase === 'GAME_OVER'
           ? (gp.role as Role)
@@ -125,6 +326,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
 
   // ── Mafia teammates (only for Mafia players) ──────────────────────────────
   let mafiaTeammates: string[] = []
+  let mafiaTeamNames: string[] = []
   if (myRole === 'MAFIA') {
     const { data: mafiaRows } = await supabase
       .from('game_players')
@@ -148,6 +350,14 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
         : (guestDisplayMap.get(r.guest_id) ?? r.guest_id ?? 'Unknown')
       return name as string
     })
+
+    mafiaTeamNames = mafiaTeammates
+  }
+
+  // Resolve who paused (display name for the overlay)
+  let pausedByName: string | null = null
+  if (pausedByPlayerId) {
+    pausedByName = playerDisplayMap.get(pausedByPlayerId) ?? null
   }
 
   // ── Current round ─────────────────────────────────────────────────────────
@@ -167,14 +377,11 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
     .order('created_at', { ascending: true })
 
   const announcements: Announcement[] = (publicEvents ?? []) as Announcement[]
-  // Extended announcements (with target_player_id + round_id) used for Bollywood event computation
   const annExt: AnnExt[] = (publicEvents ?? []) as unknown as AnnExt[]
 
   // ── Detective private result (only for Detective) ─────────────────────────
   let detectiveResult: string | null = null
   if (myRole === 'DETECTIVE' && round) {
-    // limit(1) instead of maybeSingle: a historical duplicate event must not
-    // error out and hide the result.
     const { data: privEvents } = await supabase
       .from('game_events')
       .select('message')
@@ -244,7 +451,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
     }
   }
 
-  // ── Bollywood events for this player ─────────────────────────────────────
+  // ── Bollywood events ──────────────────────────────────────────────────────
   const bollywoodMode = !!(room as { bollywood_mode?: boolean | null } | null)?.bollywood_mode
   const bollywoodEvents = bollywoodMode
     ? computeBollywoodEvents({
@@ -264,7 +471,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
       })
     : []
 
-  // ── Night Engagement: question answer + night thoughts ───────────────────
+  // ── Night Engagement ──────────────────────────────────────────────────────
   let myNightQuestionAnswer = null
   let nightThoughts: string[] = []
 
@@ -273,14 +480,25 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
     const dayPhases   = ['DISCUSSION', 'DAY_ANNOUNCEMENT', 'VOTING', 'VOTE_RESOLUTION', 'GAME_OVER']
 
     if (nightPhases.includes(game.current_phase)) {
-      // Fetch the player's existing answer (for refresh resilience)
       myNightQuestionAnswer = await getMyNightQuestionAnswer(round.id)
     }
     if (dayPhases.includes(game.current_phase)) {
-      // Fetch anonymous answers from the most-recently-completed night round
-      // (same round_id — round persists through day phases)
       nightThoughts = await getNightThoughts(gameId, round.id)
     }
+  }
+
+  // ── Game history (only at GAME_OVER — full reveal) ────────────────────────
+  let gameHistory: GameHistory | null = null
+  if (game.current_phase === 'GAME_OVER') {
+    gameHistory = await buildGameHistory(
+      supabase,
+      gameId,
+      // Pass players with full role reveal (already set for GAME_OVER above)
+      players,
+      hasGuestColumns,
+      game.winning_team,
+      announcements,
+    )
   }
 
   // ── Initial ROLE_REVEAL screen ────────────────────────────────────────────
@@ -312,6 +530,7 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
     detectiveResult,
     myNightActionTargetId,
     mafiaCurrentTarget,
+    mafiaTeamNames,
     myVoteTargetId,
     voteCounts,
     revealRoleOnDeath,
@@ -326,6 +545,12 @@ export default async function GamePage({ params }: { params: Promise<{ gameId: s
       discussion: room?.discussion_timer_seconds ?? 180,
       voting: room?.voting_timer_seconds ?? 60,
     },
+    // Phase 11 — Pause / resume
+    isPaused,
+    pausedByName,
+    remainingPausedSecs,
+    // Phase 11 — Game history
+    gameHistory,
   }
 
   return <GameView {...viewProps} />
