@@ -334,6 +334,17 @@ export default function LandingPage() {
         <p className="relative z-10 text-xs text-text-faint tracking-wide">
           Mafia · Online party game · No violence, no real harm · <span className="text-gold/70">Just strategy and deception</span>
         </p>
+        <p className="relative z-10 mt-2 text-xs text-text-faint tracking-wide">
+          Built by{' '}
+          <a
+            href="https://tanai.online"
+            target="_blank"
+            rel="noopener"
+            className="text-text-muted underline-offset-2 hover:text-text-primary hover:underline transition-colors"
+          >
+            Tanay Choudhary
+          </a>
+        </p>
       </footer>
     </main>
   )
